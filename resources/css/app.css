@@ -1,0 +1,36 @@
+:root {
+  --sakura-pink: #FFB7C5;
+  --sakura-purple: #9B59B6;
+  --sakura-dark: #2C3E50;
+  --sakura-light: #FDFEFE;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  background-color: #fce4ec;
+}
+
+.el-menu {
+  border-right: none;
+}
+
+.el-header {
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.auth-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--sakura-pink), var(--sakura-purple));
+}
+
+.dashboard-card {
+  margin-bottom: 20px;
+  border-radius: 8px;
+}
