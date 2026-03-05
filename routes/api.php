@@ -68,19 +68,22 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Eventos
     Route::apiResource('eventos', EventoController::class);
+    Route::get('/eventos/{evento}/gastos-categorias', [EventoController::class, 'gastosPorCategoria']);
 
     // Stands
     Route::apiResource('stands', StandController::class);
 
     // Reservaciones
-    Route::apiResource('reservaciones', ReservacionController::class)->except(['destroy']);
+    Route::apiResource('reservaciones', ReservacionController::class);
     Route::patch('/reservaciones/{reservacion}/status', [ReservacionController::class, 'updateStatus']);
+    Route::post('/reservaciones/{reservacion}/pago-mobiliario', [ReservacionController::class, 'registrarPagoMobiliario']);
 
     // Gastos
     Route::apiResource('gastos', GastoController::class);
 
     // Pagos
     Route::post('/pagos', [PagoController::class, 'store']);
+    Route::patch('/pagos/{pago}/conciliacion', [PagoController::class, 'toggleConciliacion']);
 
     // Reembolsos
     Route::apiResource('reembolsos', ReembolsoController::class)->except(['destroy', 'update']);

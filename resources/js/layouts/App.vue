@@ -37,14 +37,6 @@
             <el-icon><Ticket /></el-icon>
             <span>Reservaciones</span>
           </el-menu-item>
-          <el-menu-item index="/mobiliario">
-            <el-icon><Monitor /></el-icon>
-            <span>Mobiliario</span>
-          </el-menu-item>
-          <el-menu-item index="/gastos">
-            <el-icon><Money /></el-icon>
-            <span>Gastos</span>
-          </el-menu-item>
           <el-menu-item index="/reportes">
             <el-icon><Document /></el-icon>
             <span>Reportes</span>
@@ -75,7 +67,7 @@
 import { onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { DataBoard, Calendar, Location, User, Ticket, Document, Monitor, Money } from '@element-plus/icons-vue'
+import { DataBoard, Calendar, Location, User, Ticket, Document, Money } from '@element-plus/icons-vue'
 
 const authStore = useAuthStore()
 const router = useRouter()

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Evento;
 use App\Models\Gasto;
 use App\Models\Pago;
+use App\Models\TasaBcv;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
@@ -14,35 +15,50 @@ class FinanzasController extends Controller
 {
     public function getGlobalMetrics()
     {
-        $totalIngresos = Pago::where('status', 'aprobado')->sum('cantidad');
+        $totalIngresosStands = Pago::where('status', 'aprobado')->where('tipo', 'stand')->sum('cantidad');
+        $totalIngresosMobiliario = Pago::where('status', 'aprobado')->where('tipo', 'mobiliario')->sum('cantidad');
         $totalGastos = Gasto::sum('monto_usd');
-        $saldo = $totalIngresos - $totalGastos;
+        
+        // El saldo neto considera TODOS los ingresos vs TODOS los gastos
+        $saldoNeto = ($totalIngresosStands + $totalIngresosMobiliario) - $totalGastos;
 
         // ROI por evento
         $eventos = Evento::with(['gastos'])->get()->map(function($evento) {
-            $ingresos = DB::table('pagos')
+            $ingresosStands = DB::table('pagos')
                 ->join('reservacions', 'pagos.reservacion_id', '=', 'reservacions.id_reservacion')
-                ->join('detalle_stands', 'reservacions.id_reservacion', '=', 'detalle_stands.reservacion_id')
-                ->join('stands', 'detalle_stands.stands_id', '=', 'stands.id_stands')
-                ->where('stands.eventos_id', $evento->id_eventos)
+                ->where('reservacions.evento_id', $evento->id_eventos)
                 ->where('pagos.status', 'aprobado')
+                ->where('pagos.tipo', 'stand')
                 ->sum('pagos.cantidad');
 
-            $gastos = $evento->gastos->sum('monto_usd');
+            $ingresosMobiliario = DB::table('pagos')
+                ->join('reservacions', 'pagos.reservacion_id', '=', 'reservacions.id_reservacion')
+                ->where('reservacions.evento_id', $evento->id_eventos)
+                ->where('pagos.status', 'aprobado')
+                ->where('pagos.tipo', 'mobiliario')
+                ->sum('pagos.cantidad');
+
+            $gastosOperativos = $evento->gastos->where('categoria', '!=', 'Pago a Proveedor de Mobiliario')->sum('monto_usd');
+            $gastosProveedor = $evento->gastos->where('categoria', 'Pago a Proveedor de Mobiliario')->sum('monto_usd');
+            $totalGastosEvento = $evento->gastos->sum('monto_usd');
 
             return [
                 'id' => $evento->id_eventos,
                 'nombre' => $evento->nombre,
-                'ingresos' => $ingresos,
-                'gastos' => $gastos,
-                'neto' => $ingresos - $gastos
+                'ingresos_stands' => (float)$ingresosStands,
+                'ingresos_mobiliario' => (float)$ingresosMobiliario,
+                'gastos_operativos' => (float)$gastosOperativos,
+                'gastos_proveedor' => (float)$gastosProveedor,
+                'gastos' => (float)$totalGastosEvento,
+                'neto' => (float)(($ingresosStands + $ingresosMobiliario) - $totalGastosEvento)
             ];
         });
 
         return response()->json([
-            'total_ingresos' => (float)$totalIngresos,
+            'total_ingresos' => (float)$totalIngresosStands,
+            'total_mobiliario' => (float)$totalIngresosMobiliario,
             'total_gastos' => (float)$totalGastos,
-            'saldo' => (float)$saldo,
+            'saldo' => (float)$saldoNeto,
             'eventos_roi' => $eventos
         ]);
     }
@@ -54,11 +70,18 @@ class FinanzasController extends Controller
             return response()->json(['error' => 'Fecha requerida'], 400);
         }
 
+        // 1. Check local cache first
+        $cached = TasaBcv::where('fecha', $fecha)->first();
+        if ($cached) {
+            return response()->json([
+                'tasa'   => $cached->tasa,
+                'fecha'  => $cached->fecha->format('Y-m-d'),
+                'fuente' => $cached->fuente ?? 'BCV (cache local)',
+            ]);
+        }
+
+        // 2. If not cached, try fetching from external API
         try {
-            // Pedimos desde 10 días ANTES de la fecha solicitada.
-            // La API devuelve datos DESDE esa fecha en adelante.
-            // Así garantizamos tener registros que cubran la fecha exacta,
-            // incluyendo fines de semana donde el BCV no publica tasa.
             $fechaBusqueda = date('Y-m-d', strtotime($fecha . ' -10 days'));
             $url = "https://ve.dolarapi.com/v1/historicos/dolares/oficial?fecha={$fechaBusqueda}";
             $response = Http::timeout(7)->get($url);
@@ -70,24 +93,39 @@ class FinanzasController extends Controller
                     return response()->json(['error' => 'No se encontró tasa para esa fecha'], 404);
                 }
 
-                // Buscamos la tasa con fecha <= a la fecha solicitada
-                // La lista viene en orden ascendente de fecha, tomamos el último que sea <= fecha solicitada
                 $rateData = null;
                 foreach ($data as $item) {
                     if (isset($item['fecha']) && $item['fecha'] <= $fecha) {
-                        $rateData = $item; // va avanzando hasta el último válido
+                        $rateData = $item;
                     }
                 }
 
-                // Si no encontramos ninguno <= fecha (muy raro), tomamos el primero disponible
                 if (!$rateData) {
                     $rateData = $data[0];
                 }
 
+                $tasa = $rateData['promedio'] ?? $rateData['precio'] ?? 0;
+                $fechaReal = $rateData['fecha'];
+                $fuente = 'BCV (histórico oficial)';
+
+                // 3. Save to local cache
+                TasaBcv::updateOrCreate(
+                    ['fecha' => $fechaReal],
+                    ['tasa' => $tasa, 'fuente' => $fuente]
+                );
+
+                // Also cache for the requested date if different
+                if ($fechaReal !== $fecha) {
+                    TasaBcv::updateOrCreate(
+                        ['fecha' => $fecha],
+                        ['tasa' => $tasa, 'fuente' => $fuente . ' (interpolada)']
+                    );
+                }
+
                 return response()->json([
-                    'tasa'   => $rateData['promedio'] ?? $rateData['precio'] ?? 0,
-                    'fecha'  => $rateData['fecha'],
-                    'fuente' => 'BCV (histórico oficial)',
+                    'tasa'   => $tasa,
+                    'fecha'  => $fechaReal,
+                    'fuente' => $fuente,
                 ]);
             }
         } catch (\Exception $e) {

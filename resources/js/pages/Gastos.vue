@@ -1,8 +1,12 @@
 <template>
   <div class="gastos-container">
-    <div class="header">
+    <div class="header" v-if="!embedded">
       <el-button @click="$emit('back')" icon="ArrowLeft">Volver a Eventos</el-button>
       <h2>Gastos: {{ evento.nombre }}</h2>
+      <el-button type="primary" @click="openDialog" icon="Plus">Registrar Gasto</el-button>
+    </div>
+    <div v-else style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+      <h3 style="margin: 0; color: var(--sakura-purple);">Egresos del Evento</h3>
       <el-button type="primary" @click="openDialog" icon="Plus">Registrar Gasto</el-button>
     </div>
 
@@ -14,9 +18,11 @@
         </template>
       </el-table-column>
       <el-table-column prop="concepto" label="Concepto" />
-      <el-table-column prop="categoria" label="Categoría" width="150">
+      <el-table-column prop="categoria" label="Categoría" width="220">
         <template #default="{ row }">
-          <el-tag size="small">{{ row.categoria || 'Otros' }}</el-tag>
+          <el-tag :type="row.categoria === 'Pago a Proveedor de Mobiliario' ? 'warning' : ''" size="small" effect="dark">
+            {{ row.categoria === 'Pago a Proveedor de Mobiliario' ? '💰 Proveedor Mob.' : (row.categoria || 'Otros') }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="Monto USD" width="150" align="right">
@@ -60,14 +66,21 @@
         
         <el-row :gutter="20">
           <el-col :span="12">
-            <el-form-item label="Categoría">
-              <el-select v-model="form.categoria" placeholder="Seleccionar...">
-                <el-option label="Alquiler" value="Alquiler" />
-                <el-option label="Publicidad" value="Publicidad" />
-                <el-option label="Personal" value="Personal" />
-                <el-option label="Logística" value="Logística" />
-                <el-option label="Servicios" value="Servicios" />
-                <el-option label="Otros" value="Otros" />
+            <el-form-item label="Categoría" prop="categoria">
+              <el-select v-model="form.categoria" placeholder="Seleccionar..." style="width: 100%;">
+                <el-option-group label="⚠️ Proveedores">
+                  <el-option label="Pago a Proveedor de Mobiliario" value="Pago a Proveedor de Mobiliario">
+                    <span style="color: #E6A23C; font-weight: bold;">💰 Pago a Proveedor de Mobiliario</span>
+                  </el-option>
+                </el-option-group>
+                <el-option-group label="Gastos Operativos">
+                  <el-option label="Alquiler" value="Alquiler" />
+                  <el-option label="Publicidad" value="Publicidad" />
+                  <el-option label="Personal" value="Personal" />
+                  <el-option label="Logística" value="Logística" />
+                  <el-option label="Servicios" value="Servicios" />
+                  <el-option label="Otros" value="Otros" />
+                </el-option-group>
               </el-select>
             </el-form-item>
           </el-col>
@@ -130,10 +143,16 @@ const props = defineProps({
   evento: {
     type: Object,
     required: true
+  },
+  embedded: {
+    type: Boolean,
+    default: false
   }
 })
 
-const defineEmits = ['back']
+const emit = defineEmits(['back'])
+
+const formRef = ref(null)
 
 const gastos = ref([])
 const loading = ref(false)
@@ -155,6 +174,7 @@ const form = ref({
 
 const rules = {
   concepto: [{ required: true, message: 'El concepto es obligatorio', trigger: 'blur' }],
+  categoria: [{ required: true, message: 'La categoría es obligatoria', trigger: 'change' }],
   fecha: [{ required: true, message: 'La fecha es obligatoria', trigger: 'change' }],
   monto_usd: [{ required: true, message: 'El monto en USD es obligatorio', trigger: 'blur' }]
 }

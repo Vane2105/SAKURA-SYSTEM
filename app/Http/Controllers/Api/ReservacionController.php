@@ -33,14 +33,12 @@ class ReservacionController extends Controller
             'descripcion' => 'nullable|string|max:45',
             'stands' => 'required|array|min:1',
             'stands.*' => 'exists:stands,id_stands',
-            'mobiliarios' => 'nullable|array',
-            'mobiliarios.*.descripcion' => 'required_with:mobiliarios|string|max:100',
-            'mobiliarios.*.cantidad' => 'required_with:mobiliarios|integer|min:1',
-            'mobiliarios.*.precio_unitario_usd' => 'required_with:mobiliarios|numeric|min:0',
+            'monto_mobiliario' => 'nullable|numeric|min:0',
             'subido_redes' => 'nullable|boolean',
             'monto_pago' => 'nullable|numeric|min:0',
             'referencia_pago' => 'nullable|string|max:100',
             'tasa_bcv' => 'nullable|numeric|min:0',
+            'monto_bs' => 'nullable|numeric|min:0',
             'fecha_pago' => 'nullable|date',
             'usuario_2_id' => 'nullable|exists:usuarios,id'
         ]);
@@ -50,6 +48,7 @@ class ReservacionController extends Controller
                 'usuarios_id' => $validated['usuarios_id'],
                 'evento_id' => $validated['evento_id'],
                 'descripcion' => $validated['descripcion'] ?? null,
+                'monto_mobiliario' => $validated['monto_mobiliario'] ?? 0,
                 'subido_redes' => $validated['subido_redes'] ?? false,
                 'usuario_2_id' => $validated['usuario_2_id'] ?? null,
                 'status' => 'pendiente'
@@ -61,46 +60,44 @@ class ReservacionController extends Controller
                 ]);
             }
 
-            $totalMobiliario = 0;
-            if (!empty($validated['mobiliarios'])) {
-                foreach ($validated['mobiliarios'] as $mob) {
-                    $reservacion->mobiliarios()->create([
-                        'descripcion' => $mob['descripcion'],
-                        'cantidad' => $mob['cantidad'],
-                        'precio_unitario_usd' => $mob['precio_unitario_usd']
-                    ]);
-                    $totalMobiliario += ($mob['cantidad'] * $mob['precio_unitario_usd']);
-                }
-            }
-
-            // Evaluar estado inicial basado en pago
+            // Evaluar estado inicial basado en pago (AQUI SOLO STAND)
             $totalStands = Stand::whereIn('id_stands', $validated['stands'])->sum('precio');
-            $totalDeuda = floatval($totalStands) + floatval($totalMobiliario);
             $montoPagado = $validated['monto_pago'] ?? 0;
 
-            if ($montoPagado >= $totalDeuda && $totalDeuda > 0) {
-                $reservacion->update(['status' => 'confirmada']);
-                foreach ($validated['stands'] as $id) {
-                    Stand::where('id_stands', $id)->update(['status' => 'ocupado']);
-                }
-            } else {
-                foreach ($validated['stands'] as $id) {
-                    Stand::where('id_stands', $id)->update(['status' => 'reservado']);
-                }
-            }
-
-            // Registrar pago inicial si existe
+            // Registrar pago inicial como 'stand'
             if ($montoPagado > 0) {
+                // Regla de Oro aplicada al Stand
+                if ($montoPagado > $totalStands && $totalStands > 0) {
+                    throw new \Exception("El monto del pago inicial ($$montoPagado) no puede exceder el precio de los stands ($$totalStands).");
+                }
+
                 $reservacion->pagos()->create([
+                    'tipo' => 'stand',
                     'cantidad' => $montoPagado,
-                    'numero_referencia' => $validated['referencia_pago'] ?? null,
+                    'monto_bs' => $validated['monto_bs'] ?? null,
                     'tasa_bcv' => $validated['tasa_bcv'] ?? null,
+                    'numero_referencia' => $validated['referencia_pago'] ?? null,
                     'fecha' => $validated['fecha_pago'] ?? now()->toDateString(),
                     'status' => 'aprobado'
                 ]);
             }
 
-            return response()->json($reservacion->load(['usuario', 'detalles.stand']), 201);
+            // Actualizar estado basado en el balance del Stand
+            $totalAbonadoStand = $reservacion->pagos()->where('tipo', 'stand')->sum('cantidad');
+            $nuevoStatus = 'pendiente';
+            if ($totalAbonadoStand >= $totalStands && $totalStands > 0) {
+                $nuevoStatus = 'confirmada';
+                Stand::whereIn('id_stands', $validated['stands'])->update(['status' => 'ocupado']);
+            } elseif ($totalAbonadoStand > 0) {
+                $nuevoStatus = 'abonada';
+                Stand::whereIn('id_stands', $validated['stands'])->update(['status' => 'reservado']);
+            } else {
+                Stand::whereIn('id_stands', $validated['stands'])->update(['status' => 'reservado']);
+            }
+            
+            $reservacion->update(['status' => $nuevoStatus]);
+
+            return response()->json($reservacion->load(['usuario', 'detalles.stand', 'pagos', 'mobiliarios']), 201);
         });
     }
 
@@ -112,23 +109,57 @@ class ReservacionController extends Controller
     public function updateStatus(Request $request, Reservacion $reservacion)
     {
         $validated = $request->validate([
-            'status' => 'required|in:pendiente,confirmada,cancelada'
+            'status' => 'required|in:pendiente,confirmada,cancelada,abonada'
         ]);
 
-        DB::transaction(function () use ($request, $reservacion, $validated) {
+        DB::transaction(function () use ($reservacion, $validated) {
             $reservacion->update(['status' => $validated['status']]);
 
             if ($validated['status'] === 'cancelada') {
-                // Liberar stands
                 $standIds = $reservacion->detalles()->pluck('stands_id');
                 Stand::whereIn('id_stands', $standIds)->update(['status' => 'disponible']);
-            } elseif ($validated['status'] === 'confirmada') {
+            } elseif ($validated['status'] === 'confirmada' || $validated['status'] === 'abonada') {
                 $standIds = $reservacion->detalles()->pluck('stands_id');
-                Stand::whereIn('id_stands', $standIds)->update(['status' => 'ocupado']);
+                Stand::whereIn('id_stands', $standIds)->update(['status' => ($validated['status'] === 'confirmada' ? 'ocupado' : 'reservado')]);
             }
         });
 
         return response()->json($reservacion->fresh(['detalles.stand']));
+    }
+
+    public function registrarPagoMobiliario(Request $request, Reservacion $reservacion)
+    {
+        $validated = $request->validate([
+            'cantidad' => 'required|numeric|min:0.01',
+            'monto_bs' => 'nullable|numeric|min:0',
+            'tasa_bcv' => 'nullable|numeric|min:0.01',
+            'numero_referencia' => 'nullable|string|max:100',
+            'fecha' => 'nullable|date',
+        ]);
+
+        return DB::transaction(function () use ($validated, $reservacion) {
+            // Bloquear la fila para evitar condiciones de carrera
+            $reservacion = Reservacion::lockForUpdate()->find($reservacion->id_reservacion);
+
+            // Crear el pago
+            $pago = $reservacion->pagos()->create([
+                'tipo' => 'mobiliario',
+                'cantidad' => $validated['cantidad'],
+                'monto_bs' => $validated['monto_bs'] ?? null,
+                'tasa_bcv' => $validated['tasa_bcv'] ?? null,
+                'numero_referencia' => $validated['numero_referencia'] ?? null,
+                'fecha' => $validated['fecha'] ?? now()->toDateString(),
+                'status' => 'aprobado'
+            ]);
+
+            // Incrementar el monto total de mobiliario asignado (Cero deuda)
+            $reservacion->increment('monto_mobiliario', $validated['cantidad']);
+
+            return response()->json([
+                'message' => 'Mobiliario pagado y asignado correctamente.',
+                'reservacion' => $reservacion->fresh(['pagos'])
+            ]);
+        });
     }
 
     public function update(Request $request, Reservacion $reservacion)
@@ -141,5 +172,17 @@ class ReservacionController extends Controller
         $reservacion->update($validated);
 
         return response()->json($reservacion->fresh(['usuario', 'detalles.stand', 'pagos']));
+    }
+
+    public function destroy(Reservacion $reservacion)
+    {
+        // Liberar stands antes de borrar lógicamente si no está cancelada
+        if ($reservacion->status !== 'cancelada') {
+            $standIds = $reservacion->detalles()->pluck('stands_id');
+            Stand::whereIn('id_stands', $standIds)->update(['status' => 'disponible']);
+        }
+
+        $reservacion->delete();
+        return response()->json(['message' => 'Reservación eliminada correctamente.']);
     }
 }

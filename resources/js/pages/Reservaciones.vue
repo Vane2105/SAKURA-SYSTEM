@@ -19,54 +19,54 @@
 
     <el-table v-else :data="reservaciones" v-loading="loading" style="width: 100%" border stripe show-summary :summary-method="getGlobalSummaries">
       <el-table-column prop="id_reservacion" label="ID" width="60" />
-      <el-table-column prop="usuario.nombre_tienda" label="Tienda">
+      <el-table-column label="Tiendas">
         <template #default="scope">
-          {{ scope.row.usuario?.nombre_tienda || scope.row.usuario?.nombre }}
+          <div style="font-weight: bold;">{{ scope.row.usuario?.nombre_tienda || scope.row.usuario?.nombre }}</div>
+          <div v-if="scope.row.usuario2" style="font-size: 11px; color: #909399;">
+            Compartido con: {{ scope.row.usuario2?.nombre_tienda || scope.row.usuario2?.nombre }}
+          </div>
         </template>
       </el-table-column>
-      <el-table-column label="Stands">
+      <el-table-column label="Estado de Pago" width="180">
         <template #default="scope">
-          <el-tag v-for="d in scope.row.detalles" :key="d.id_detalle_stand" size="small" style="margin-right: 5px;">
-            {{ d.stand?.name }}
+          <el-tag :type="getStatusColor(scope.row.status)" effect="dark" size="small">
+            Stand: {{ formatStatus(scope.row.status) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="status" label="Estado" width="120">
+      <el-table-column label="Resumen Financiero" width="280">
         <template #default="scope">
-          <el-tag :type="getStatusColor(scope.row.status)">
-            {{ scope.row.status.toUpperCase() }}
-          </el-tag>
+          <div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px;">
+            <div style="display: flex; justify-content: space-between;">
+              <span>Stand:</span>
+              <b>${{ calcularTotalStands(scope.row).toFixed(2) }}</b>
+            </div>
+            <div style="display: flex; justify-content: space-between; color: #F56C6C;">
+              <span>Deuda Stand:</span>
+              <b>${{ Math.max(0, calcularTotalStands(scope.row) - calcularPagado(scope.row, 'stand')).toFixed(2) }}</b>
+            </div>
+            <el-divider style="margin: 4px 0;" />
+            <div style="display: flex; justify-content: space-between; color: #67C23A;">
+              <span>Mobiliario Pagado:</span>
+              <b>${{ (scope.row.monto_mobiliario || 0).toFixed(2) }}</b>
+            </div>
+          </div>
         </template>
       </el-table-column>
-      <el-table-column label="Mobiliario" width="100" align="center">
+      <el-table-column label="Acciones" width="300" align="center">
         <template #default="scope">
-          <span v-if="calcularTotalMobiliario(scope.row) > 0">${{ calcularTotalMobiliario(scope.row).toFixed(2) }}</span>
-          <span v-else style="color: #ccc;">—</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="Total Deuda" width="120" align="right">
-        <template #default="scope">
-          <strong>${{ (calcularTotalStands(scope.row) + calcularTotalMobiliario(scope.row)).toFixed(2) }}</strong>
-        </template>
-      </el-table-column>
-      <el-table-column label="Total Pagado" width="120" align="right">
-        <template #default="scope">
-          <span style="color: #67C23A">${{ calcularPagado(scope.row).toFixed(2) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="Equiv. Total Bs" width="140" align="right">
-        <template #default="scope">
-          <span style="color: var(--sakura-purple)">Bs {{ ((calcularTotalStands(scope.row) + calcularTotalMobiliario(scope.row)) * tasaBcv).toFixed(2) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="Acciones" width="180" align="center">
-        <template #default="scope">
-          <el-button size="small" type="success" @click="openPagoDialog(scope.row)" v-if="scope.row.status !== 'cancelada'">
-            Pago
-          </el-button>
-          <el-button size="small" type="danger" @click="changeStatus(scope.row, 'cancelada')" v-if="scope.row.status !== 'cancelada'">
-            Cancelar
-          </el-button>
+          <div style="display: flex; gap: 5px; justify-content: center; flex-wrap: wrap;">
+            <el-button size="small" circle type="info" @click="openVerDialog(scope.row)" :icon="View" />
+            <el-button size="small" type="primary" @click="openPagoDialog(scope.row)" :disabled="isSolventeStand(scope.row)">
+              Stand
+            </el-button>
+            <el-button size="small" type="warning" @click="openMobiliarioDialog(scope.row)">
+              Mob.
+            </el-button>
+            <el-tooltip :content="hasConciliado(scope.row) ? 'Desconcilie los pagos antes de eliminar' : 'Eliminar reservación'" placement="top">
+              <el-button size="small" circle type="danger" @click="confirmDelete(scope.row)" :icon="Delete" :disabled="hasConciliado(scope.row)" />
+            </el-tooltip>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -74,189 +74,352 @@
     <!-- Dialogo Crear Reservacion -->
     <el-dialog title="Nueva Reservación" v-model="dialogVisible" width="600px">
       <el-form :model="form" ref="formRef" :rules="rules" label-width="120px" label-position="top">
-        <el-form-item label="Emprendedor" prop="usuarios_id">
-          <el-select v-model="form.usuarios_id" filterable placeholder="Buscar emprendedor..." style="width: 100%">
-            <el-option v-for="u in usuarios" :key="u.id" :label="u.nombre_tienda || u.nombre" :value="u.id" />
-          </el-select>
-        </el-form-item>
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="Emprendedor Principal" prop="usuarios_id">
+              <el-select v-model="form.usuarios_id" filterable placeholder="Buscar..." style="width: 100%">
+                <el-option v-for="u in usuarios" :key="u.id" :label="u.nombre_tienda || u.nombre" :value="u.id" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="Segundo Emprendedor (Opcional)">
+              <el-select v-model="form.usuario_2_id" filterable clearable placeholder="Buscar..." style="width: 100%">
+                <el-option v-for="u in usuarios" :key="u.id" :label="u.nombre_tienda || u.nombre" :value="u.id" :disabled="u.id === form.usuarios_id" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
 
         <el-row :gutter="20">
           <el-col :span="24">
             <el-form-item label="Stands" prop="stands">
-              <el-select v-model="form.stands" multiple placeholder="Seleccionar stands..." style="width: 100%">
+              <el-select v-model="form.stands" multiple placeholder="Seleccionar stands..." style="width: 100%" @change="validateFormPayment">
                 <el-option v-for="s in standsDisponibles" :key="s.id_stands" :label="`${s.evento?.nombre} - ${s.name} ($${s.precio})`" :value="s.id_stands" />
               </el-select>
             </el-form-item>
           </el-col>
         </el-row>
 
-        <el-divider>Mobiliario / Extras (Opcional)</el-divider>
-        <div v-for="(item, index) in form.mobiliarios" :key="index" style="display: flex; gap: 10px; margin-bottom: 15px; align-items: start;">
-          <el-input v-model="item.descripcion" placeholder="Descripción (Ej: Mesa VIP)" style="flex: 2" />
-          <el-input-number v-model="item.cantidad" :min="1" placeholder="Cant." style="flex: 1" />
-          <el-input-number v-model="item.precio_unitario_usd" :min="0" :precision="2" :step="1" placeholder="Precio ($)" style="flex: 1.2" />
-          <el-button type="danger" icon="Delete" circle @click="removeMobiliario(index)" />
-        </div>
-        <el-button type="dashed" style="width: 100%; margin-bottom: 20px;" @click="addMobiliario">
-          <el-icon style="margin-right: 5px;"><Plus /></el-icon> Añadir Ítem de Mobiliario/Extra
-        </el-button>
-
-        <!-- Resumen Detallado de Precios -->
-        <div v-if="form.stands.length > 0 || form.mobiliarios.length > 0" style="margin-bottom: 20px; border: 1px solid #e4e7ed; border-radius: 8px; overflow: hidden;">
+        <el-divider>Registro de Pago Inicial (STAND)</el-divider>
+        <div v-if="form.stands.length > 0" style="margin-bottom: 20px; border: 1px solid #e4e7ed; border-radius: 8px; overflow: hidden;">
           <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-            <tr style="background: #f5f7fa;">
-              <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e4e7ed;">Concepto</th>
-              <th style="padding: 8px; text-align: right; border-bottom: 1px solid #e4e7ed;">Cant</th>
-              <th style="padding: 8px; text-align: right; border-bottom: 1px solid #e4e7ed;">USD</th>
-              <th style="padding: 8px; text-align: right; border-bottom: 1px solid #e4e7ed;">Bs (BCV)</th>
+            <tr style="background: #f5f7fa; font-weight: bold; font-size: 15px;">
+              <td style="padding: 10px 8px; color: #606266;">TOTAL STAND</td>
+              <td style="padding: 10px 8px; text-align: right; color: #606266;">${{ totalStandsUsd.toFixed(2) }}</td>
+              <td style="padding: 10px 8px; text-align: right; color: #606266;">Bs {{ (totalStandsUsd * form.tasa_bcv).toFixed(2) }}</td>
             </tr>
-            <tr v-if="form.stands.length > 0">
-              <td style="padding: 8px; border-bottom: 1px solid #ebeef5;">Stands</td>
-              <td style="padding: 8px; border-bottom: 1px solid #ebeef5; text-align: right;">{{ form.stands.length }}</td>
-              <td style="padding: 8px; border-bottom: 1px solid #ebeef5; text-align: right;">${{ totalStandsUsd.toFixed(2) }}</td>
-              <td style="padding: 8px; border-bottom: 1px solid #ebeef5; text-align: right;">Bs {{ (totalStandsUsd * tasaBcv).toFixed(2) }}</td>
+            <tr v-if="form.monto_pago > 0" style="background: #f0f9eb; font-weight: bold;">
+              <td style="padding: 8px; color: #67c23a;">ABONO INICIAL STAND</td>
+              <td style="padding: 8px; text-align: right; color: #67c23a;">-${{ form.monto_pago.toFixed(2) }}</td>
+              <td style="padding: 8px; text-align: right; color: #67c23a;">-Bs {{ (form.monto_pago * form.tasa_bcv).toFixed(2) }}</td>
             </tr>
-            <tr v-for="(mob, i) in form.mobiliarios" :key="`mob-${i}`">
-              <td style="padding: 8px; border-bottom: 1px solid #ebeef5; color: #606266; font-size: 13px;">{{ mob.descripcion || 'Ítem' }}</td>
-              <td style="padding: 8px; border-bottom: 1px solid #ebeef5; text-align: right; color: #606266; font-size: 13px;">{{ mob.cantidad || 0 }}</td>
-              <td style="padding: 8px; border-bottom: 1px solid #ebeef5; text-align: right; color: #606266; font-size: 13px;">${{ ((mob.cantidad || 0) * (mob.precio_unitario_usd || 0)).toFixed(2) }}</td>
-              <td style="padding: 8px; border-bottom: 1px solid #ebeef5; text-align: right; color: #606266; font-size: 13px;">Bs {{ (((mob.cantidad || 0) * (mob.precio_unitario_usd || 0)) * tasaBcv).toFixed(2) }}</td>
-            </tr>
-            <tr style="background: #fdf6ec; font-weight: bold; font-size: 16px;">
-              <td colspan="2" style="padding: 8px; color: var(--sakura-purple);">TOTAL A PAGAR</td>
-              <td style="padding: 8px; text-align: right; color: var(--sakura-purple);">${{ granTotalUsd.toFixed(2) }}</td>
-              <td style="padding: 8px; text-align: right; color: var(--sakura-purple);">Bs {{ (granTotalUsd * tasaBcv).toFixed(2) }}</td>
+            <tr style="background: #fef0f0; font-weight: bold; font-size: 17px; border-top: 2px solid var(--sakura-purple);">
+              <td style="padding: 10px 8px; color: var(--sakura-purple);">DEUDA RESTANTE STAND</td>
+              <td style="padding: 10px 8px; text-align: right; color: var(--sakura-purple);">${{ Math.max(0, totalStandsUsd - form.monto_pago).toFixed(2) }}</td>
+              <td style="padding: 10px 8px; text-align: right; color: var(--sakura-purple);">Bs {{ (Math.max(0, totalStandsUsd - form.monto_pago) * form.tasa_bcv).toFixed(2) }}</td>
             </tr>
           </table>
         </div>
 
-        <el-form-item label="Descripción (Opcional)">
-           <el-input v-model="form.descripcion" />
+        <el-form-item label="Fecha de Pago Inicial">
+          <el-date-picker v-model="form.fecha_pago" type="date" placeholder="Seleccione fecha" style="width: 100%" value-format="YYYY-MM-DD" @change="handleFormDateChange" />
         </el-form-item>
 
-        <el-divider>Pago Inicial (Opcional)</el-divider>
         <el-row :gutter="20">
           <el-col :span="12">
-            <el-form-item label="Monto Pagado ($)">
-              <el-input-number v-model="form.monto_pago" :min="0" :precision="2" :step="10" style="width: 100%" />
+            <el-form-item label="Monto inicial Bs">
+              <el-input-number v-model="form.monto_bs" :min="0" :precision="2" style="width: 100%" @change="recalculateFormUsd" @blur="validateFormPayment" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="Referencia">
-              <el-input v-model="form.referencia_pago" placeholder="Nro de ref." />
+            <el-form-item label="Monto inicial $">
+              <el-input-number v-model="form.monto_pago" :min="0" :precision="2" style="width: 100%" @change="recalculateFormBs" @blur="validateFormPayment" />
             </el-form-item>
           </el-col>
         </el-row>
-        <div v-if="tasaBcv > 0 && form.monto_pago > 0" style="font-size: 13px; color: #67C23A; font-weight: bold; margin-bottom: 15px;">
-          Equivalente: Bs {{ (form.monto_pago * tasaBcv).toFixed(2) }}
-        </div>
+
+        <el-form-item label="Tasa Aplicada (Bs/$)">
+          <el-input-number v-model="form.tasa_bcv" :min="0.01" :precision="2" style="width: 100%" @change="recalculateFormUsd" />
+        </el-form-item>
+
+        <el-form-item label="Referencia">
+          <el-input v-model="form.referencia_pago" placeholder="Nro de referencia" />
+        </el-form-item>
+
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">Cancelar</el-button>
         <el-button type="primary" @click="saveReservacion" :loading="saving" style="background-color: var(--sakura-purple); border: none;">
-          Confirmar y Guardar
+          Guardar Reservación
         </el-button>
       </template>
     </el-dialog>
 
-    <!-- Dialogo Registrar Pago -->
-    <el-dialog title="Registrar Pago" v-model="pagoDialogVisible" width="450px">
-      <!-- Tabla de deuda total -->
-      <div v-if="currentRes" style="margin-bottom: 20px; border: 1px solid #ebeef5; border-radius: 8px; overflow: hidden;">
-        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-          <tr style="background: #fafafa; font-weight: bold;">
-            <td style="padding: 8px; border-bottom: 1px solid #ebeef5;">Concepto</td>
-            <td style="padding: 8px; border-bottom: 1px solid #ebeef5; text-align: right;">Total</td>
-          </tr>
-          <tr>
-            <td style="padding: 6px 8px;">Stands</td>
-            <td style="padding: 6px 8px; text-align: right;">${{ calcularTotalStands(currentRes).toFixed(2) }}</td>
-          </tr>
-          <tr v-if="calcularTotalMobiliario(currentRes) > 0">
-            <td style="padding: 6px 8px;">Mobiliario y Extras</td>
-            <td style="padding: 6px 8px; text-align: right;">${{ calcularTotalMobiliario(currentRes).toFixed(2) }}</td>
-          </tr>
-          <tr style="color: #67C23A;">
-            <td style="padding: 6px 8px;">Monto ya Pagado</td>
-            <td style="padding: 6px 8px; text-align: right;">-${{ calcularPagado(currentRes).toFixed(2) }}</td>
-          </tr>
-          <tr style="background: #fdf6ec; font-weight: bold; border-top: 2px solid #e6a23c;">
-            <td style="padding: 8px;">DEUDA RESTANTE</td>
-            <td style="padding: 8px; text-align: right; color: #E6A23C;">
-              ${{ Math.max(0, (calcularTotalStands(currentRes) + calcularTotalMobiliario(currentRes)) - calcularPagado(currentRes)).toFixed(2) }}
-              <br>
-              <small style="font-weight: normal; color: #909399;">
-                Bs {{ (Math.max(0, (calcularTotalStands(currentRes) + calcularTotalMobiliario(currentRes)) - calcularPagado(currentRes)) * tasaBcv).toFixed(2) }}
-              </small>
-            </td>
-          </tr>
-        </table>
+    <!-- Dialogo Registrar Pago STAND -->
+    <el-dialog title="Registrar Pago de STAND" v-model="pagoDialogVisible" width="450px">
+      <div v-if="currentRes" style="margin-bottom: 20px; padding: 15px; background: #fdf6ec; border-radius: 8px; border: 1px solid #e6a23c;">
+        <div style="font-weight: bold; color: #E6A23C; margin-bottom: 8px; text-transform: uppercase; font-size: 12px;">Caja Stand:</div>
+        <div style="display: flex; justify-content: space-between; font-size: 14px;">
+          <span>Precio Stand:</span>
+          <b>${{ calcularTotalStands(currentRes).toFixed(2) }}</b>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 14px; color: #67C23A;">
+          <span>Pagado Stand:</span>
+          <b>-${{ calcularPagado(currentRes, 'stand').toFixed(2) }}</b>
+        </div>
+        <el-divider style="margin: 8px 0;" />
+        <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; color: var(--sakura-purple);">
+          <span>PENDIENTE STAND:</span>
+          <span>${{ currentStandRemainingDebt.toFixed(2) }}</span>
+        </div>
       </div>
 
       <el-form :model="pagoForm" ref="pagoFormRef" label-position="top">
+        <el-form-item label="Fecha de Pago" required>
+          <el-date-picker v-model="pagoForm.fecha_pago" type="date" style="width: 100%" value-format="YYYY-MM-DD" @change="handleDateChange" />
+        </el-form-item>
         <el-row :gutter="20">
           <el-col :span="12">
-            <el-form-item label="Monto ($)" required>
-              <el-input-number v-model="pagoForm.cantidad" :min="0.1" :precision="2" :step="10" style="width: 100%" />
+            <el-form-item label="Monto Bs">
+              <el-input-number v-model="pagoForm.monto_bs" :min="0" :precision="2" style="width: 100%" @change="recalculateUsd" @blur="validatePaymentAmount" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="Fecha de Pago" required>
-              <el-date-picker 
-                v-model="pagoForm.fecha_pago" 
-                type="date" 
-                placeholder="Seleccione fecha" 
-                style="width: 100%"
-                value-format="YYYY-MM-DD"
-                @change="handleDateChange"
-              />
+            <el-form-item label="Monto USD ($)">
+              <el-input-number v-model="pagoForm.cantidad" :min="0" :precision="2" style="width: 100%" @change="recalculateBs" @blur="validatePaymentAmount" />
             </el-form-item>
           </el-col>
         </el-row>
-        
-        <div v-if="loadingRate" style="margin-bottom: 10px; color: #9d4edd; font-size: 12px;">
-          <el-icon class="is-loading"><Loading /></el-icon> Obteniendo tasa del histórico...
-        </div>
-        
-        <!-- Lista de Pagos Realizados (Inmutables) -->
-        <div v-if="currentRes?.pagos?.length > 0" style="margin-top: 15px; margin-bottom: 20px;">
-          <div style="font-size: 12px; font-weight: bold; color: #909399; margin-bottom: 8px; text-transform: uppercase;">Pagos Registrados:</div>
-          <div v-for="p in currentRes.pagos" :key="p.id_pagos" class="pago-item-fixed">
-            <div class="pago-info">
-              <span class="monto-usd">${{ parseFloat(p.cantidad).toFixed(2) }}</span>
-              <span class="ref" v-if="p.numero_referencia"> - Ref: {{ p.numero_referencia }}</span>
-            </div>
-            <div class="pago-bs" v-if="p.tasa_bcv">
-              Bs {{ (p.cantidad * p.tasa_bcv).toFixed(2) }} <small>(Tasa: {{ p.tasa_bcv }})</small>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="pagoForm.cantidad > 0" style="background: linear-gradient(135deg, #f5f0ff, #fff0f5); padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e8d5f5;">
-          <div style="font-size: 12px; color: #888; margin-bottom: 4px;">Equivalente en Bolívares (Tasa: {{ pagoForm.tasa_bcv }} Bs/$)</div>
-          <div style="font-size: 22px; font-weight: bold; color: var(--sakura-purple);">
-            Bs {{ (pagoForm.cantidad * pagoForm.tasa_bcv).toFixed(2) }}
-          </div>
-          <div style="font-size: 10px; color: #999; margin-top: 4px;" v-if="pagoForm.tasa_fuente">Fuente: {{ pagoForm.tasa_fuente }}</div>
-        </div>
-
+        <el-form-item label="Tasa BCV (Bs/$)">
+          <el-input-number v-model="pagoForm.tasa_bcv" :min="0.01" :precision="2" style="width: 100%" @change="recalculateUsd" />
+        </el-form-item>
         <el-form-item label="Referencia">
-          <el-input v-model="pagoForm.numero_referencia" placeholder="Nro de transferencia/pago móvil" />
+          <el-input v-model="pagoForm.numero_referencia" placeholder="Ref. transferencia" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="pagoDialogVisible = false">Cerrar</el-button>
-        <el-button type="success" @click="savePago" :loading="saving">Añadir Pago</el-button>
+        <el-button type="primary" @click="savePago('stand')" :loading="saving">Añadir Pago Stand</el-button>
       </template>
     </el-dialog>
+
+    <!-- Dialogo Mobiliario Pago al Contado -->
+    <el-dialog title="Añadir Mobiliario (Pago al Contado)" v-model="mobDialogVisible" width="500px">
+      <div v-if="currentRes">
+        <div style="background: #f0f9eb; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c2e7b0;">
+           <div style="font-weight: bold; color: #67C23A; margin-bottom: 8px; text-transform: uppercase; font-size: 12px;">Mobiliario Asignado:</div>
+           <div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: bold; color: #67C23A;">
+             <span>TOTAL PAGADO:</span>
+             <span>${{ (currentRes.monto_mobiliario || 0).toFixed(2) }}</span>
+           </div>
+        </div>
+
+        <p style="font-size: 13px; color: #606266; margin-bottom: 15px;">
+          Solo puedes añadir mobiliario registrando su pago inmediato. No se permite deuda de mobiliario.
+        </p>
+
+        <el-divider>Registrar Nuevo Pago de Mobiliario</el-divider>
+        <el-form :model="mobPagoForm" label-position="top">
+          <el-row :gutter="20">
+             <el-col :span="12">
+               <el-form-item label="Fecha">
+                 <el-date-picker v-model="mobPagoForm.fecha_pago" type="date" style="width: 100%" value-format="YYYY-MM-DD" @change="handleMobDateChange" />
+               </el-form-item>
+             </el-col>
+             <el-col :span="12">
+               <el-form-item label="Tasa BCV">
+                 <el-input-number v-model="mobPagoForm.tasa_bcv" :min="0.01" :precision="2" style="width: 100%" @change="recalculateMobUsd" />
+               </el-form-item>
+             </el-col>
+          </el-row>
+          <el-row :gutter="20">
+             <el-col :span="12">
+               <el-form-item label="Monto Bs">
+                 <el-input-number v-model="mobPagoForm.monto_bs" :min="0" :precision="2" style="width: 100%" @change="recalculateMobUsd" />
+               </el-form-item>
+             </el-col>
+             <el-col :span="12">
+               <el-form-item label="Monto USD ($)">
+                 <el-input-number v-model="mobPagoForm.cantidad" :min="0" :precision="2" style="width: 100%" @change="recalculateMobBs" />
+               </el-form-item>
+             </el-col>
+          </el-row>
+          <el-form-item label="Referencia">
+            <el-input v-model="mobPagoForm.numero_referencia" placeholder="Ref. de pago" />
+          </el-form-item>
+          <el-button type="warning" style="width: 100%; height: 50px; font-weight: bold;" @click="savePagoMobiliario" :loading="saving">
+            PAGAR Y ASIGNAR MOBILIARIO
+          </el-button>
+        </el-form>
+      </div>
+    </el-dialog>
+
+    <!-- Dialogo Ver Detalles -->
+    <el-dialog title="Detalle de Reservación" v-model="verDialogVisible" width="650px" custom-class="ver-detalle-dialog">
+      <div v-if="verData" style="font-family: 'Outfit', sans-serif;">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="ID">{{ verData.id_reservacion }}</el-descriptions-item>
+          <el-descriptions-item label="Fecha">{{ new Date(verData.created_at).toLocaleDateString() }}</el-descriptions-item>
+          <el-descriptions-item label="Tienda Principal" :span="2">
+            <b>{{ verData.usuario?.nombre_tienda || verData.usuario?.nombre }}</b>
+          </el-descriptions-item>
+          <el-descriptions-item label="Compartido con" v-if="verData.usuario2" :span="2">
+            {{ verData.usuario2?.nombre_tienda || verData.usuario2?.nombre }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Estado Stand">
+            <el-tag :type="getStatusColor(verData.status)">{{ formatStatus(verData.status) }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="Mobiliario Pagado">
+            <el-tag type="success" effect="plain">${{ (verData.monto_mobiliario || 0).toFixed(2) }}</el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <h4 style="margin: 20px 0 10px; color: var(--sakura-purple); border-bottom: 2px solid #f0f2f5; padding-bottom: 5px;">
+          <el-icon><Location /></el-icon> Stands Reservados
+        </h4>
+        <el-table :data="verData.detalles" size="small" border stripe>
+          <el-table-column label="Stand">
+            <template #default="s"><b>{{ s.row.stand?.name }}</b></template>
+          </el-table-column>
+          <el-table-column label="Precio" align="right">
+            <template #default="s">${{ parseFloat(s.row.stand?.precio || 0).toFixed(2) }}</template>
+          </el-table-column>
+        </el-table>
+
+        <h4 style="margin: 20px 0 10px; color: var(--sakura-purple); border-bottom: 2px solid #f0f2f5; padding-bottom: 5px;">
+          <el-icon><Money /></el-icon> Historial de Pagos
+        </h4>
+        <el-table :data="verData.pagos" size="small" border stripe max-height="300px">
+          <el-table-column prop="fecha" label="Fecha" width="95" />
+          <el-table-column prop="tipo" label="Tipo" width="80">
+            <template #default="p">
+              <el-tag :type="p.row.tipo === 'stand' ? 'primary' : 'warning'" size="small">
+                {{ p.row.tipo === 'stand' ? 'Stand' : 'Mob.' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="Monto ($)" align="right" width="95">
+            <template #default="p"><b>${{ parseFloat(p.row.cantidad).toFixed(2) }}</b></template>
+          </el-table-column>
+          <el-table-column label="Monto (Bs)" align="right" width="120">
+             <template #default="p">
+               <div style="font-size: 11px;">Bs {{ parseFloat(p.row.monto_bs || 0).toFixed(2) }}</div>
+               <div style="font-size: 10px; color: #909399;">(Tasa: {{ p.row.tasa_bcv }})</div>
+             </template>
+          </el-table-column>
+          <el-table-column prop="numero_referencia" label="Ref" width="90" show-overflow-tooltip />
+          <el-table-column label="Banco" width="100" align="center">
+            <template #default="p">
+              <el-switch
+                v-model="p.row.conciliado"
+                active-text="✅"
+                inactive-text="⏳"
+                active-color="#67C23A"
+                inactive-color="#E6A23C"
+                @change="toggleConciliacion(p.row)"
+                :loading="p.row._toggling"
+                size="small"
+              />
+            </template>
+          </el-table-column>
+        </el-table>
+        
+        <div style="margin-top: 20px; text-align: right; font-weight: bold; font-size: 16px; border-top: 1px solid #ebeef5; padding-top: 15px; display: flex; justify-content: space-between; align-items: center;">
+           <el-button type="success" @click="printReceipt" icon="Printer">Imprimir Comprobante</el-button>
+           <div>
+             Total General Pagado: 
+             <span style="color: var(--sakura-purple); margin-left: 10px;">
+               ${{ (calcularPagado(verData, 'stand') + calcularPagado(verData, 'mobiliario')).toFixed(2) }}
+             </span>
+           </div>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- Plantilla Imprimible (Oculta) -->
+    <div id="printable-receipt" v-if="verData" class="print-only">
+      <div class="receipt-header">
+        <div class="logo">🌸 Sakura Fest</div>
+        <div class="title">COMPROBANTE DE RESERVACIÓN</div>
+        <div class="receipt-id">ID: #{{ verData.id_reservacion }}</div>
+      </div>
+
+      <div class="receipt-section">
+        <div class="section-title">Datos del Emprendedor</div>
+        <div class="data-row"><span>Tienda:</span> <b>{{ verData.usuario?.nombre_tienda || verData.usuario?.nombre }}</b></div>
+        <div class="data-row" v-if="verData.usuario2"><span>Socio:</span> <b>{{ verData.usuario2?.nombre_tienda || verData.usuario2?.nombre }}</b></div>
+        <div class="data-row"><span>Fecha Emisión:</span> {{ new Date().toLocaleDateString() }}</div>
+      </div>
+
+      <div class="receipt-section">
+        <div class="section-title">Detalle de Stands</div>
+        <table class="receipt-table">
+          <thead>
+            <tr>
+              <th>Stand</th>
+              <th style="text-align: right;">Precio</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in verData.detalles" :key="s.id_detalle">
+              <td>{{ s.stand?.name }}</td>
+              <td style="text-align: right;">${{ parseFloat(s.stand?.precio || 0).toFixed(2) }}</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td><b>TOTAL STANDS</b></td>
+              <td style="text-align: right;"><b>${{ calcularTotalStands(verData).toFixed(2) }}</b></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="receipt-section">
+        <div class="section-title">Historial de Pagos</div>
+        <table class="receipt-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Tipo</th>
+              <th>Ref</th>
+              <th style="text-align: right;">Monto</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in verData.pagos" :key="p.id_pago">
+              <td>{{ p.fecha }}</td>
+              <td>{{ p.tipo === 'stand' ? 'Stand' : 'Mob.' }}</td>
+              <td>{{ p.numero_referencia || '-' }}</td>
+              <td style="text-align: right;">${{ parseFloat(p.cantidad).toFixed(2) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="receipt-summary">
+        <div class="summary-line"><span>Mobiliario Pagado:</span> <span>${{ (verData.monto_mobiliario || 0).toFixed(2) }}</span></div>
+        <div class="summary-line"><span>Total Pagado Stand:</span> <span>${{ calcularPagado(verData, 'stand').toFixed(2) }}</span></div>
+        <div class="summary-line total">
+          <span>TOTAL GENERAL PAGADO:</span> 
+          <span>${{ (calcularPagado(verData, 'stand') + (verData.monto_mobiliario || 0)).toFixed(2) }}</span>
+        </div>
+      </div>
+
+      <div class="receipt-footer">
+        <p>Gracias por ser parte de la familia Sakura Fest 🌸</p>
+        <p style="font-size: 10px; color: #777;">Este documento es un comprobante digital de pago y asignación.</p>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Calendar, Delete, Plus, Loading } from '@element-plus/icons-vue'
+import { Calendar, Delete, Plus, Loading, Box, View, Location, Money, Printer } from '@element-plus/icons-vue'
 
 const reservaciones = ref([])
 const usuarios = ref([])
@@ -266,341 +429,410 @@ const eventos = ref([])
 const filterEvento = ref(null)
 
 const loading = ref(false)
-const currentRes = ref(null)
-const tasaBcv = ref(75.00)
-
-const dialogVisible = ref(false)
 const saving = ref(false)
-const formRef = ref(null)
-
+const dialogVisible = ref(false)
 const pagoDialogVisible = ref(false)
-const pagoFormRef = ref(null)
-const loadingRate = ref(false)
+const mobDialogVisible = ref(false)
+const verDialogVisible = ref(false)
+const currentRes = ref(null)
+const verData = ref(null)
+const tasaBcv = ref(0.00)
 
+const formRef = ref(null)
 const form = ref({
   usuarios_id: '',
+  usuario_2_id: null,
   stands: [],
-  mobiliarios: [],
   descripcion: '',
-  subido_redes: false,
-  monto_pago: 0,
+  monto_pago: 0.00,
+  monto_bs: 0.00,
+  fecha_pago: new Date().toISOString().split('T')[0],
+  tasa_bcv: 0.00,
   referencia_pago: ''
 })
 
 const pagoForm = ref({
   reservacion_id: null,
-  cantidad: 0,
+  cantidad: 0.00,
+  monto_bs: 0.00,
   fecha_pago: new Date().toISOString().split('T')[0],
-  tasa_bcv: 0,
-  tasa_fuente: '',
+  tasa_bcv: 0.00,
+  numero_referencia: ''
+})
+
+const mobPagoForm = ref({
+  reservacion_id: null,
+  cantidad: 0.00,
+  monto_bs: 0.00,
+  fecha_pago: new Date().toISOString().split('T')[0],
+  tasa_bcv: 0.00,
   numero_referencia: ''
 })
 
 const rules = {
-  usuarios_id: [{ required: true, message: 'El emprendedor es obligatorio', trigger: 'blur' }],
-  stands: [{ required: true, message: 'Debe seleccionar al menos un stand', type: 'array', min: 1, trigger: 'blur' }]
+  usuarios_id: [{ required: true, message: 'El emprendedor es obligatorio', trigger: 'change' }],
+  stands: [{ required: true, message: 'Seleccione al menos 1 stand', type: 'array', min: 1, trigger: 'change' }]
 }
 
-const getStatusColor = (status) => {
-  return status === 'confirmada' ? 'success' : (status === 'cancelada' ? 'danger' : 'warning')
-}
-
-const calcularPagado = (res) => {
-  if (!res.pagos) return 0
-  return res.pagos.reduce((total, p) => total + parseFloat(p.cantidad), 0)
+// Helpers Logica
+const calcularPagado = (res, tipo) => {
+  if (!res || !res.pagos) return 0.00
+  return res.pagos.filter(p => p.tipo === tipo).reduce((t, p) => t + parseFloat(p.cantidad || 0), 0.00)
 }
 
 const calcularTotalStands = (res) => {
-  if (!res.detalles) return 0
-  return res.detalles.reduce((total, d) => total + parseFloat(d.stand?.precio || 0), 0)
+  if (!res || !res.detalles) return 0.00
+  return res.detalles.reduce((t, d) => t + parseFloat(d.stand?.precio || 0), 0.00)
 }
 
-const calcularTotalMobiliario = (res) => {
-  if (!res.mobiliarios || res.mobiliarios.length === 0) return 0
-  return res.mobiliarios.reduce((total, m) => total + (parseFloat(m.cantidad || 0) * parseFloat(m.precio_unitario_usd || 0)), 0)
+// Estados
+const formatStatus = (status) => {
+  if (status === 'confirmada') return 'SOLVENTE'
+  if (status === 'abonada') return 'ABONADO'
+  return 'PENDIENTE'
 }
 
-const totalStandsUsd = computed(() => {
-  return form.value.stands.reduce((total, standId) => {
-    const stand = allStands.value.find(s => s.id_stands === standId)
-    return total + (stand ? parseFloat(stand.precio) : 0)
-  }, 0)
+const getStatusColor = (status) => {
+  if (status === 'confirmada') return 'success'
+  if (status === 'abonada') return 'warning'
+  return 'info'
+}
+
+const isSolventeStand = (res) => (calcularTotalStands(res) - calcularPagado(res, 'stand')) <= 0
+
+const currentStandRemainingDebt = computed(() => {
+  if (!currentRes.value) return 0.00
+  const total = calcularTotalStands(currentRes.value)
+  const paid = calcularPagado(currentRes.value, 'stand')
+  return Math.max(0, total - paid)
 })
 
-const granTotalUsd = computed(() => {
-  const mobs = form.value.mobiliarios.reduce((total, m) => total + ((m.cantidad || 0) * (m.precio_unitario_usd || 0)), 0)
-  return totalStandsUsd.value + mobs
-})
-
-const fetchInitialData = async () => {
-  try {
-    const [resUsr, resStands, resEvent] = await Promise.all([
-      axios.get('/api/usuarios'),
-      axios.get('/api/stands'),
-      axios.get('/api/eventos')
-    ])
-    usuarios.value = resUsr.data.filter(u => u.role_id === 2)
-    allStands.value = resStands.data
-    eventos.value = resEvent.data
-  } catch (error) {
-    ElMessage.error('Error al cargar datos maestros')
+// Validaciones Hardened (OnBlur)
+const validatePaymentAmount = () => {
+  const remaining = currentStandRemainingDebt.value
+  if (pagoForm.value.cantidad > (remaining + 0.001)) {
+    ElMessage.warning(`Monto excedido. Ajustado a deuda: $${remaining.toFixed(2)}`)
+    pagoForm.value.cantidad = parseFloat(remaining.toFixed(2))
+    recalculateBs()
   }
 }
 
-const getGlobalSummaries = (param) => {
-  const { columns, data } = param
-  const sums = []
-  columns.forEach((column, index) => {
-    if (index === 0) {
-      sums[index] = 'TOTALES'
-      return
-    }
-    
-    // Sumar Mobiliario
-    if (column.label === 'Mobiliario') {
-      const values = data.map(item => calcularTotalMobiliario(item))
-      const total = values.reduce((prev, curr) => prev + curr, 0)
-      sums[index] = `$${total.toFixed(2)}`
-    }
-    
-    // Sumar Total Deuda
-    if (column.label === 'Total Deuda') {
-      const values = data.map(item => (calcularTotalStands(item) + calcularTotalMobiliario(item)))
-      const total = values.reduce((prev, curr) => prev + curr, 0)
-      sums[index] = `$${total.toFixed(2)}`
-    }
-
-    // Sumar Total Pagado
-    if (column.label === 'Total Pagado') {
-      const values = data.map(item => calcularPagado(item))
-      const total = values.reduce((prev, curr) => prev + curr, 0)
-      sums[index] = `$${total.toFixed(2)}`
-    }
-
-    // Sumar Equiv Total Bs
-    if (column.label === 'Equiv. Total Bs') {
-      const values = data.map(item => ((calcularTotalStands(item) + calcularTotalMobiliario(item)) * tasaBcv.value))
-      const total = values.reduce((prev, curr) => prev + curr, 0)
-      sums[index] = `Bs ${total.toFixed(2)}`
-    }
-
-    if (!sums[index]) sums[index] = ''
-  })
-  return sums
+const validateFormPayment = () => {
+  const total = totalStandsUsd.value
+  if (form.value.monto_pago > (total + 0.001)) {
+    ElMessage.warning(`El anticipo no puede superar el stand: $${total.toFixed(2)}`)
+    form.value.monto_pago = parseFloat(total.toFixed(2))
+    recalculateFormBs()
+  }
 }
 
+// Calculadoras
+const recalculateUsd = () => { if (pagoForm.value.tasa_bcv > 0) pagoForm.value.cantidad = parseFloat((pagoForm.value.monto_bs / pagoForm.value.tasa_bcv).toFixed(2)) }
+const recalculateBs = () => { if (pagoForm.value.tasa_bcv > 0) pagoForm.value.monto_bs = parseFloat((pagoForm.value.cantidad * pagoForm.value.tasa_bcv).toFixed(2)) }
+const recalculateMobUsd = () => { if (mobPagoForm.value.tasa_bcv > 0) mobPagoForm.value.cantidad = parseFloat((mobPagoForm.value.monto_bs / mobPagoForm.value.tasa_bcv).toFixed(2)) }
+const recalculateMobBs = () => { if (mobPagoForm.value.tasa_bcv > 0) mobPagoForm.value.monto_bs = parseFloat((mobPagoForm.value.cantidad * mobPagoForm.value.tasa_bcv).toFixed(2)) }
+const recalculateFormUsd = () => { if (form.value.tasa_bcv > 0) form.value.monto_pago = parseFloat((form.value.monto_bs / form.value.tasa_bcv).toFixed(2)) }
+const recalculateFormBs = () => { if (form.value.tasa_bcv > 0) form.value.monto_bs = parseFloat((form.value.monto_pago * form.value.tasa_bcv).toFixed(2)) }
+
+// Sincronización
 const fetchReservaciones = async () => {
-  if (!filterEvento.value) {
-    reservaciones.value = []
-    standsDisponibles.value = []
-    return
-  }
-
+  if (!filterEvento.value) return reservaciones.value = []
   loading.value = true
   try {
     const res = await axios.get(`/api/reservaciones?evento_id=${filterEvento.value}`)
     reservaciones.value = res.data
-
-    // Show only available stands for the selected event
     standsDisponibles.value = allStands.value.filter(s => s.eventos_id == filterEvento.value && s.status === 'disponible')
-  } catch (error) {
-    ElMessage.error('Error al cargar las reservaciones del evento')
-  } finally {
-    loading.value = false
+    syncCurrentRes()
+  } catch(e) {} finally { loading.value = false }
+}
+
+const syncCurrentRes = () => {
+  if (currentRes.value) {
+    const found = reservaciones.value.find(r => r.id_reservacion === currentRes.value.id_reservacion)
+    if (found) currentRes.value = found
   }
 }
 
-const fetchTasaBcv = async () => {
+const fetchInitialData = async () => {
+  const [resUsr, resStands, resEvent, resTasa] = await Promise.all([
+    axios.get('/api/usuarios'),
+    axios.get('/api/stands'),
+    axios.get('/api/eventos'),
+    axios.get('/api/tasa-bcv')
+  ])
+  usuarios.value = resUsr.data.filter(u => u.role_id === 2)
+  allStands.value = resStands.data.map(s => ({ ...s, precio: parseFloat(s.precio) }))
+  eventos.value = resEvent.data
+  tasaBcv.value = parseFloat(resTasa.data.tasa) || 0.00
+}
+
+const totalStandsUsd = computed(() => {
+  return form.value.stands.reduce((t, id) => t + (allStands.value.find(s => s.id_stands === id)?.precio || 0.00), 0.00)
+})
+
+const handleDateChange = (val) => fetchHistoryRate(val, pagoForm.value, recalculateUsd)
+const handleMobDateChange = (val) => fetchHistoryRate(val, mobPagoForm.value, recalculateMobUsd)
+const handleFormDateChange = (val) => fetchHistoryRate(val, form.value, recalculateFormUsd)
+
+const fetchHistoryRate = async (fecha, targetForm, callback) => {
+  if (!fecha) return
+  if (fecha === new Date().toISOString().split('T')[0]) {
+    targetForm.tasa_bcv = tasaBcv.value
+    callback()
+    return
+  }
   try {
-    const res = await axios.get('/api/tasa-bcv')
-    if (res.data.tasa > 0) {
-      tasaBcv.value = parseFloat(res.data.tasa)
-    }
-  } catch (e) {
-    console.warn('No se pudo obtener la tasa BCV')
-  }
+    const res = await axios.get(`/api/tasa-bcv/historico?fecha=${fecha}`)
+    targetForm.tasa_bcv = parseFloat(res.data.tasa)
+    callback()
+  } catch (e) { targetForm.tasa_bcv = tasaBcv.value; callback() }
 }
 
-const addMobiliario = () => {
-  form.value.mobiliarios.push({ descripcion: '', cantidad: 1, precio_unitario_usd: 0 })
-}
-
-const removeMobiliario = (index) => {
-  form.value.mobiliarios.splice(index, 1)
-}
-
+// Handlers
 const openDialog = () => {
   form.value = { 
-    usuarios_id: '', 
-    stands: [], 
-    mobiliarios: [],
-    descripcion: '', 
-    subido_redes: false,
-    monto_pago: 0,
-    referencia_pago: ''
+    usuarios_id: '', usuario_2_id: null, stands: [],
+    monto_pago: 0.00, monto_bs: 0.00, tasa_bcv: tasaBcv.value,
+    fecha_pago: new Date().toISOString().split('T')[0], referencia_pago: ''
   }
+  nextTick(() => { if (formRef.value) formRef.value.clearValidate() })
   dialogVisible.value = true
 }
 
 const saveReservacion = async () => {
-  if (!formRef.value) return
-  
-  // Validar mobiliarios vacíos
-  for (const m of form.value.mobiliarios) {
-    if (!m.descripcion || m.descripcion.trim() === '') {
-      ElMessage.warning('Todos los ítems de mobiliario deben tener una descripción.')
-      return
-    }
-  }
-
   await formRef.value.validate(async (valid) => {
-    if (valid) {
-      saving.value = true
-      try {
-        const payload = { 
-          ...form.value,
-          evento_id: filterEvento.value,
-          tasa_bcv: tasaBcv.value
-        }
-        await axios.post('/api/reservaciones', payload)
-        ElMessage.success('Reservación creada con éxito')
-        dialogVisible.value = false
-        fetchReservaciones()
-      } catch (error) {
-        if (error.response && error.response.status === 422) {
-          const errors = error.response.data.errors
-          const firstError = Object.values(errors)[0][0]
-          ElMessage.error(firstError)
-        } else {
-          ElMessage.error('Error al guardar: ' + (error.response?.data?.message || 'Error desconocido'))
-        }
-      } finally {
-        saving.value = false
-      }
-    }
+    if (!valid) return
+    saving.value = true
+    try {
+      await axios.post('/api/reservaciones', { ...form.value, evento_id: filterEvento.value })
+      ElMessage.success('Reservación creada')
+      dialogVisible.value = false
+      fetchReservaciones()
+    } catch (e) { ElMessage.error(e.response?.data?.message || 'Error') }
+    finally { saving.value = false }
   })
-}
-
-const changeStatus = async (res, status) => {
-  try {
-    await ElMessageBox.confirm(`¿Seguro que deseas marcarla como ${status}?`, 'Confirmación')
-    await axios.patch(`/api/reservaciones/${res.id_reservacion}/status`, { status })
-    ElMessage.success('Estado actualizado')
-    fetchReservaciones()
-  } catch (e) { }
-}
-
-const toggleRedes = async (res) => {
-  try {
-    await axios.patch(`/api/reservaciones/${res.id_reservacion}`, { subido_redes: res.subido_redes })
-    ElMessage.success(res.subido_redes ? 'Marcado como subido a redes' : 'Desmarcado de redes')
-  } catch (e) {
-    ElMessage.error('Error al actualizar')
-    res.subido_redes = !res.subido_redes
-  }
 }
 
 const openPagoDialog = (res) => {
   currentRes.value = res
   pagoForm.value = { 
-    reservacion_id: res.id_reservacion, 
-    cantidad: 0, 
-    fecha_pago: new Date().toISOString().split('T')[0],
-    tasa_bcv: tasaBcv.value,
-    tasa_fuente: 'Actual (BCV)',
-    numero_referencia: ''
+    reservacion_id: res.id_reservacion, tipo: 'stand', 
+    cantidad: 0.00, monto_bs: 0.00, tasa_bcv: tasaBcv.value, 
+    fecha_pago: new Date().toISOString().split('T')[0], numero_referencia: '' 
   }
   pagoDialogVisible.value = true
 }
 
-const handleDateChange = async (val) => {
-  if (!val) return
-  
-  // Si es hoy, usar tasaBcv actual
-  const hoy = new Date().toISOString().split('T')[0]
-  if (val === hoy) {
-    pagoForm.value.tasa_bcv = tasaBcv.value
-    pagoForm.value.tasa_fuente = 'Actual (BCV)'
-    return
+const openMobiliarioDialog = (res) => {
+  currentRes.value = res
+  mobPagoForm.value = { 
+    reservacion_id: res.id_reservacion, tipo: 'mobiliario', 
+    cantidad: 0.00, monto_bs: 0.00, tasa_bcv: tasaBcv.value, 
+    fecha_pago: new Date().toISOString().split('T')[0], numero_referencia: '' 
   }
+  mobDialogVisible.value = true
+}
 
-  loadingRate.value = true
+const openVerDialog = (res) => {
+  verData.value = res
+  verDialogVisible.value = true
+}
+
+const printReceipt = () => {
+  window.print()
+}
+
+// === CONCILIACION BANCARIA ===
+const hasConciliado = (res) => {
+  return res?.pagos?.some(p => p.conciliado) || false
+}
+
+const toggleConciliacion = async (pago) => {
+  pago._toggling = true
   try {
-    const res = await axios.get(`/api/tasa-bcv/historico?fecha=${val}`)
-    pagoForm.value.tasa_bcv = parseFloat(res.data.tasa)
-    pagoForm.value.tasa_fuente = res.data.fuente
+    await axios.patch(`/api/pagos/${pago.id_pagos}/conciliacion`)
+    ElMessage.success(pago.conciliado ? 'Pago conciliado ✅' : 'Marcado como pendiente ⏳')
+    await fetchReservaciones()
+    // Refresh detail view if open
+    if (verData.value) {
+      const updated = reservaciones.value.find(r => r.id_reservacion === verData.value.id_reservacion)
+      if (updated) verData.value = updated
+    }
   } catch (e) {
-    ElMessage.warning('No se encontró tasa para esa fecha. Se usará la tasa actual.')
-    pagoForm.value.tasa_bcv = tasaBcv.value
-    pagoForm.value.tasa_fuente = 'Fallback (Actual)'
+    pago.conciliado = !pago.conciliado // Revert
+    ElMessage.error('Error al cambiar estado de conciliación')
   } finally {
-    loadingRate.value = false
+    pago._toggling = false
   }
 }
 
-const savePago = async () => {
+const confirmDelete = (res) => {
+  if (hasConciliado(res)) {
+    return ElMessage.warning('No se puede eliminar: tiene pagos conciliados. Desconcilie primero.')
+  }
+  ElMessageBox.confirm(
+    `¿Está seguro de eliminar la reservación de "${res.usuario?.nombre_tienda || res.usuario?.nombre}"? Esta acción liberará los stands asociados.`,
+    'Confirmar Eliminación',
+    {
+      confirmButtonText: 'Eliminar',
+      cancelButtonText: 'Cancelar',
+      type: 'warning',
+      confirmButtonClass: 'el-button--danger'
+    }
+  ).then(async () => {
+    try {
+      await axios.delete(`/api/reservaciones/${res.id_reservacion}`)
+      ElMessage.success('Reservación eliminada correctamente')
+      fetchReservaciones()
+    } catch (e) {
+      ElMessage.error('Error al eliminar reservación')
+    }
+  }).catch(() => {})
+}
+
+const savePago = async (tipo) => {
+  const f = pagoForm.value
+  validatePaymentAmount()
+  if (f.cantidad <= 0.00) return ElMessage.warning('Monto inválido')
   saving.value = true
   try {
-    if (pagoForm.value.cantidad > 0) {
-      await axios.post('/api/pagos', {
-        reservacion_id: pagoForm.value.reservacion_id,
-        cantidad: pagoForm.value.cantidad,
-        numero_referencia: pagoForm.value.numero_referencia,
-        tasa_bcv: pagoForm.value.tasa_bcv,
-        fecha_pago: pagoForm.value.fecha_pago
-      })
-    }
-    
-    ElMessage.success('Información actualizada correctamente')
+    await axios.post('/api/pagos', { ...f, fecha: f.fecha_pago })
+    ElMessage.success(`Pago de ${tipo} registrado`)
     pagoDialogVisible.value = false
-    fetchReservaciones()
-  } catch (error) {
-    if (error.response && error.response.status === 422) {
-      const errors = error.response.data.errors
-      const firstError = Object.values(errors)[0][0]
-      ElMessage.error(firstError)
-    } else {
-      ElMessage.error('Error al procesar el pago: ' + (error.response?.data?.message || 'Error desconocido'))
-    }
-  } finally {
-    saving.value = false
-  }
+    await fetchReservaciones()
+  } catch (e) { ElMessage.error('Error en pago') }
+  finally { saving.value = false }
 }
 
-onMounted(() => {
-  fetchInitialData()
-  fetchTasaBcv()
-})
+const savePagoMobiliario = async () => {
+  const f = mobPagoForm.value
+  if (f.cantidad <= 0.00) return ElMessage.warning('Ingrese un monto válido')
+  saving.value = true
+  try {
+    await axios.post(`/api/reservaciones/${currentRes.value.id_reservacion}/pago-mobiliario`, { ...f, fecha: f.fecha_pago })
+    ElMessage.success('Mobiliario pagado y asignado')
+    mobDialogVisible.value = false
+    await fetchReservaciones()
+  } catch (e) { ElMessage.error('Error al registrar pago de mobiliario') }
+  finally { saving.value = false }
+}
+
+const getGlobalSummaries = (param) => {
+  const { columns, data } = param
+  const sums = []
+  columns.forEach((col, i) => {
+    if (i === 0) return sums[i] = 'TOTALES'
+    if (col.label === 'Mobiliario Pagado') {
+       sums[i] = `$${data.reduce((p, c) => p + parseFloat(c.monto_mobiliario || 0), 0).toFixed(2)}`
+    }
+    if (!sums[i]) sums[i] = ''
+  })
+  return sums
+}
+
+onMounted(() => { fetchInitialData() })
 </script>
 
 <style scoped>
-.pago-item-fixed {
-  background: #fdfdfd;
-  border-left: 4px solid #909399;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-  border-radius: 4px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border: 1px solid #f0f0f0;
+.print-only {
+  display: none;
 }
-.monto-usd {
-  font-weight: bold;
-  color: #303133;
-}
-.ref {
-  color: #909399;
-  font-size: 11px;
-}
-.pago-bs {
-  text-align: right;
-  font-size: 12px;
-  color: #606266;
-  font-weight: 500;
-}
-.pago-bs small {
-  color: #999;
-  font-weight: normal;
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-receipt, #printable-receipt * {
+    visibility: visible;
+  }
+  #printable-receipt {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 40px;
+    background: white;
+    font-family: 'Outfit', sans-serif !important;
+    color: #333;
+  }
+  .receipt-header {
+    text-align: center;
+    margin-bottom: 30px;
+    border-bottom: 3px solid #FFB7C5;
+    padding-bottom: 15px;
+  }
+  .logo {
+    font-size: 28px;
+    font-weight: bold;
+    color: #FFB7C5;
+  }
+  .receipt-header .title {
+    font-size: 18px;
+    color: #555;
+    margin-top: 5px;
+  }
+  .receipt-id {
+    font-size: 14px;
+    color: #999;
+  }
+  .receipt-section {
+    margin-bottom: 25px;
+  }
+  .section-title {
+    font-weight: bold;
+    text-transform: uppercase;
+    font-size: 13px;
+    color: #9d4edd;
+    border-bottom: 1px solid #eee;
+    margin-bottom: 10px;
+    padding-bottom: 3px;
+  }
+  .data-row {
+    margin-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .receipt-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+  }
+  .receipt-table th, .receipt-table td {
+    padding: 8px;
+    border-bottom: 1px solid #f0f0f0;
+    text-align: left;
+    font-size: 13px;
+  }
+  .receipt-table th {
+    background: #fafafa;
+    color: #666;
+  }
+  .receipt-summary {
+    margin-top: 20px;
+    padding: 15px;
+    background: #fff9fb;
+    border-radius: 8px;
+  }
+  .summary-line {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    font-size: 14px;
+  }
+  .summary-line.total {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 2px solid #FFB7C5;
+    font-weight: bold;
+    font-size: 18px;
+    color: #9d4edd;
+  }
+  .receipt-footer {
+    margin-top: 50px;
+    text-align: center;
+    font-size: 12px;
+    color: #999;
+  }
 }
 </style>

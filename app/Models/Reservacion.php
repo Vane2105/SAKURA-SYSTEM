@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Reservacion extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $primaryKey = 'id_reservacion';
 
@@ -19,11 +20,13 @@ class Reservacion extends Model
         'subido_redes',
         'usuario_2_id',
         'evento_id',
+        'monto_mobiliario',
     ];
 
     protected $casts = [
         'fecha_reserva' => 'datetime',
         'subido_redes' => 'boolean',
+        'monto_mobiliario' => 'float',
     ];
 
     public function usuario()

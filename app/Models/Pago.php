@@ -13,17 +13,22 @@ class Pago extends Model
 
     protected $fillable = [
         'reservacion_id',
+        'tipo',
         'cantidad',
         'tasa_bcv',
+        'monto_bs',
         'fecha',
         'numero_referencia',
         'status',
+        'conciliado',
     ];
 
     protected $casts = [
         'fecha' => 'date',
         'cantidad' => 'float',
         'tasa_bcv' => 'float',
+        'monto_bs' => 'float',
+        'conciliado' => 'boolean',
     ];
 
     public function reservacion()
