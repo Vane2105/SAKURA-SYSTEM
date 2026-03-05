@@ -8,6 +8,8 @@ import Stands from '../pages/Stands.vue'
 import Usuarios from '../pages/Usuarios.vue'
 import Reservaciones from '../pages/Reservaciones.vue'
 import Reportes from '../pages/Reportes.vue'
+import Gastos from '../pages/Gastos.vue'
+import Mobiliario from '../pages/Mobiliario.vue'
 
 const routes = [
     { path: '/login', component: Login, name: 'Login', meta: { guest: true } },
@@ -16,6 +18,8 @@ const routes = [
     { path: '/stands', component: Stands, name: 'Stands', meta: { requiresAuth: true } },
     { path: '/usuarios', component: Usuarios, name: 'Usuarios', meta: { requiresAuth: true } },
     { path: '/reservaciones', component: Reservaciones, name: 'Reservaciones', meta: { requiresAuth: true } },
+    { path: '/mobiliario', component: Mobiliario, name: 'Mobiliario', meta: { requiresAuth: true } },
+    { path: '/gastos', component: Gastos, name: 'Gastos', meta: { requiresAuth: true } },
     { path: '/reportes', component: Reportes, name: 'Reportes', meta: { requiresAuth: true } },
 ]
 

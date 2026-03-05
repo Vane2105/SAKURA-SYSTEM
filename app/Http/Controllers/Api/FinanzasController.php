@@ -55,28 +55,40 @@ class FinanzasController extends Controller
         }
 
         try {
-            // Intentar con DolarAPI histórico
-            $url = "https://ve.dolarapi.com/v1/historicos/dolares/oficial?fecha={$fecha}";
-            $response = Http::timeout(5)->get($url);
+            // Pedimos desde 10 días ANTES de la fecha solicitada.
+            // La API devuelve datos DESDE esa fecha en adelante.
+            // Así garantizamos tener registros que cubran la fecha exacta,
+            // incluyendo fines de semana donde el BCV no publica tasa.
+            $fechaBusqueda = date('Y-m-d', strtotime($fecha . ' -10 days'));
+            $url = "https://ve.dolarapi.com/v1/historicos/dolares/oficial?fecha={$fechaBusqueda}";
+            $response = Http::timeout(7)->get($url);
 
             if ($response->ok()) {
                 $data = $response->json();
-                // DolarAPI retorna un array de historicos, buscamos la fecha exacta o el ultimo disponible
-                // Nota: DolarAPI historico a veces devuelve una lista, filtramos por la fecha exacta si es posible
-                $rateData = collect($data)->firstWhere('fecha', $fecha);
-                
-                // Si no hay match exacto en la lista (raro), probar fallback o el primero
-                if (!$rateData && count($data) > 0) {
-                    $rateData = $data[count($data) - 1];
+
+                if (!is_array($data) || count($data) === 0) {
+                    return response()->json(['error' => 'No se encontró tasa para esa fecha'], 404);
                 }
 
-                if ($rateData) {
-                    return response()->json([
-                        'tasa' => $rateData['promedio'] ?? $rateData['precio'] ?? 0,
-                        'fecha' => $rateData['fecha'],
-                        'fuente' => 'BCV (dolarapi historico)'
-                    ]);
+                // Buscamos la tasa con fecha <= a la fecha solicitada
+                // La lista viene en orden ascendente de fecha, tomamos el último que sea <= fecha solicitada
+                $rateData = null;
+                foreach ($data as $item) {
+                    if (isset($item['fecha']) && $item['fecha'] <= $fecha) {
+                        $rateData = $item; // va avanzando hasta el último válido
+                    }
                 }
+
+                // Si no encontramos ninguno <= fecha (muy raro), tomamos el primero disponible
+                if (!$rateData) {
+                    $rateData = $data[0];
+                }
+
+                return response()->json([
+                    'tasa'   => $rateData['promedio'] ?? $rateData['precio'] ?? 0,
+                    'fecha'  => $rateData['fecha'],
+                    'fuente' => 'BCV (histórico oficial)',
+                ]);
             }
         } catch (\Exception $e) {
             \Log::error("Error fetching historical rate: " . $e->getMessage());

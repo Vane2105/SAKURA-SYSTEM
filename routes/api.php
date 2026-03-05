@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AlquilerMobiliarioController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\EventoController;
 use App\Http\Controllers\Api\FinanzasController;
@@ -10,6 +11,7 @@ use App\Http\Controllers\Api\ReporteController;
 use App\Http\Controllers\Api\ReservacionController;
 use App\Http\Controllers\Api\StandController;
 use App\Http\Controllers\Api\UsuarioController;
+
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -83,6 +85,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // Reembolsos
     Route::apiResource('reembolsos', ReembolsoController::class)->except(['destroy', 'update']);
     Route::patch('/reembolsos/{reembolso}/procesar', [ReembolsoController::class, 'procesar']);
+
+    // Mobiliario (Alquiler)
+    Route::apiResource('alquileres-mobiliario', AlquilerMobiliarioController::class)->except(['show']);
+    Route::post('/alquileres-mobiliario/{alquilerMobiliario}/pagos', [AlquilerMobiliarioController::class, 'storePago']);
 
     // Reportes
     Route::get('/reportes/confirmados', [ReporteController::class, 'getConfirmados']);
