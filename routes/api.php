@@ -77,6 +77,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('reservaciones', ReservacionController::class);
     Route::patch('/reservaciones/{reservacion}/status', [ReservacionController::class, 'updateStatus']);
     Route::post('/reservaciones/{reservacion}/pago-mobiliario', [ReservacionController::class, 'registrarPagoMobiliario']);
+    Route::post('/reservaciones/{reservacion}/retiro', [ReservacionController::class, 'procesarRetiro']);
 
     // Gastos
     Route::apiResource('gastos', GastoController::class);

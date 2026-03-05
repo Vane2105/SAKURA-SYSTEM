@@ -3,6 +3,16 @@
     <div class="header">
       <h2>🌸 Mapa de Stands</h2>
       <div class="header-actions">
+        <el-tag
+          v-if="filterEvento && totalDeuda > 0"
+          type="warning"
+          effect="dark"
+          size="large"
+          style="margin-right: 15px; font-size: 14px;"
+        >
+          Deuda Total: ${{ totalDeuda.toFixed(2) }}
+        </el-tag>
+
         <el-select v-model="filterEvento" placeholder="Seleccionar Evento" @change="fetchStands" style="width: 250px;">
           <el-option v-for="e in eventos" :key="e.id_eventos" :label="e.nombre" :value="e.id_eventos" />
         </el-select>
@@ -23,7 +33,7 @@
         v-for="s in filteredStands" 
         :key="s.id_stands" 
         class="stand-card" 
-        :class="s.status"
+        :class="[s.status, { 'has-debt': ['ocupado', 'reservado'].includes(s.status) && Number(s.saldo_pendiente) > 0 }]"
         @click="openDialog(s)"
       >
         <div class="stand-name">{{ s.name }}</div>
@@ -56,7 +66,11 @@
           <el-col :span="12">
             <el-form-item label="Estado">
               <el-select v-model="form.status" style="width: 100%">
-                <el-option label="Disponible" value="disponible" />
+                <el-option 
+                  label="Disponible" 
+                  value="disponible" 
+                  :disabled="getOccupant(form) && Number(form.saldo_pendiente) >= 0 && hasPagosAprobados(getReservacionActiva(form))" 
+                />
                 <el-option label="Reservado" value="reservado" />
                 <el-option label="Ocupado" value="ocupado" />
                 <el-option label="Mantenimiento" value="mantenimiento" />
@@ -65,11 +79,43 @@
           </el-col>
         </el-row>
         
-        <div v-if="getOccupant(form)" class="occupant-detail">
-          <el-divider>Ocupante</el-divider>
-          <div style="text-align: center; color: var(--sakura-purple);">
-            <el-icon size="24"><Shop /></el-icon>
-            <div style="font-weight: bold; font-size: 16px;">{{ getOccupant(form) }}</div>
+        <div v-if="getOccupantData(form)" class="occupant-detail">
+          <el-divider>Ocupante Actual (CRM)</el-divider>
+          <div style="text-align: center;">
+            <div style="font-weight: bold; font-size: 18px; color: var(--sakura-purple);">
+              {{ getOccupant(form) }}
+              <el-icon v-if="getOccupantData(form).estado_registro === 'Documentos OK'" color="#67c23a" style="margin-left: 5px;"><SuccessFilled /></el-icon>
+            </div>
+            
+            <div style="margin: 10px 0; display: flex; justify-content: center; gap: 15px; font-size: 14px; color: #606266;">
+              <span><b>Rubro:</b> {{ getOccupantData(form).rubro || 'N/A' }}</span>
+              <span v-if="getOccupantData(form).instagram">
+                <b>IG:</b> <a :href="`https://instagram.com/${getOccupantData(form).instagram.replace('@','')}`" target="_blank" style="color: #E1306C; text-decoration: none; font-weight: bold;">
+                  @{{ getOccupantData(form).instagram.replace('@','') }}
+                </a>
+              </span>
+            </div>
+
+            <el-tag :type="getStatusTypeCRM(getOccupantData(form).estado_registro)" effect="plain" size="small" style="margin-bottom: 15px;">
+              {{ getOccupantData(form).estado_registro }}
+            </el-tag>
+
+            <div style="margin-top: 5px; font-size: 14px; color: #f56c6c;" v-if="Number(form.saldo_pendiente) > 0">
+              <strong>Deuda Pendiente:</strong> ${{ Number(form.saldo_pendiente).toFixed(2) }}
+            </div>
+            <div style="margin-top: 5px; font-size: 14px; color: #67c23a;" v-else>
+              <strong>Solvente</strong> (Total Pagado)
+            </div>
+
+            <p v-if="getOccupantData(form).notas_admin" style="font-size: 12px; color: #909399; font-style: italic; margin-top: 10px; background: white; padding: 8px; border-radius: 4px; border: 1px solid #eee;">
+               "{{ getOccupantData(form).notas_admin }}"
+            </p>
+          </div>
+          
+          <div style="margin-top: 20px; text-align: center;">
+             <el-button type="danger" plain icon="Remove" @click="confirmWithdrawal" style="width: 100%;">
+               Registrar Retiro del Evento
+             </el-button>
           </div>
         </div>
       </el-form>
@@ -80,26 +126,78 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- Diálogo de Retiro de Emprendedor -->
+    <el-dialog title="Confirmar Retiro del Evento" v-model="retireDialogVisible" width="400px">
+      <div v-if="getReservacionActiva(form)" style="margin-bottom: 20px;">
+        <p>Está a punto de retirar al emprendedor <strong>{{ getOccupant(form) }}</strong> del stand <strong>{{ form.name }}</strong>.</p>
+        <p>Esta acción cancelará su reservación y liberará este stand en el mapa inmediatamente.</p>
+        
+        <div v-if="hasPagosAprobados(getReservacionActiva(form))" style="background: #fdf6ec; padding: 15px; border-radius: 8px; margin-top: 15px;">
+           <div style="color: #e6a23c; font-weight: bold; margin-bottom: 10px;">
+             <el-icon><Warning /></el-icon> Acción Financiera Requerida
+           </div>
+           <p style="font-size: 13px;">Hay pagos aprobados en esta reservación. ¿Qué desea hacer con el dinero ya abonado?</p>
+           
+           <el-radio-group v-model="retireModel.accion_financiera" style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
+             <el-radio value="credito">Mantener como saldo a favor (Crédito)</el-radio>
+             <el-radio value="reembolso">Registrar Devolución (Reembolso)</el-radio>
+           </el-radio-group>
+        </div>
+
+        <el-input
+          v-model="retireModel.motivo"
+          type="textarea"
+          :rows="2"
+          placeholder="Motivo del retiro u observación extra (Opcional)..."
+          style="margin-top: 20px;"
+        />
+      </div>
+
+      <template #footer>
+        <el-button @click="retireDialogVisible = false" :disabled="retiring">Cancelar</el-button>
+        <el-button type="danger" @click="executeRetire" :loading="retiring">
+          Confirmar Retiro
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
-import { ElMessage } from 'element-plus'
-import { User, Shop, Refresh } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { User, Shop, Refresh, Warning, Remove, SuccessFilled } from '@element-plus/icons-vue'
 
 const stands = ref([])
 const eventos = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const retireDialogVisible = ref(false)
 const filterEvento = ref('')
+const retiring = ref(false)
+
+const retireModel = ref({
+  accion_financiera: 'credito',
+  motivo: ''
+})
+
+const totalDeuda = computed(() => {
+  return stands.value.reduce((acc, stand) => {
+    if (['ocupado', 'reservado'].includes(stand.status)) {
+      return acc + Number(stand.saldo_pendiente || 0);
+    }
+    return acc;
+  }, 0);
+})
 
 const form = ref({
   id_stands: null,
   name: '',
   precio: 0,
+  saldo_pendiente: 0,
   status: 'disponible',
   detalles: []
 })
@@ -109,19 +207,48 @@ const formRef = ref(null)
 const rules = {
   name: [{ required: true, message: 'El nombre/código es obligatorio', trigger: 'blur' }],
   precio: [{ required: true, message: 'El precio es obligatorio', trigger: 'blur' }],
-  status: [{ required: true, message: 'El estado es obligatorio', trigger: 'change' }]
+  status: [
+    { required: true, message: 'El estado es obligatorio', trigger: 'change' },
+    {
+      validator: (rule, value, callback) => {
+        if (value === 'disponible' && getOccupant(form.value) && Number(form.value.saldo_pendiente) >= 0 && hasPagosAprobados(getReservacionActiva(form.value))) {
+          callback(new Error('No puede cambiar manualmente a Disponible un stand con pagos. Use "Registrar Retiro".'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'change'
+    }
+  ]
 }
 
 const filteredStands = computed(() => stands.value)
 
-const getOccupant = (stand) => {
+const getReservacionActiva = (stand) => {
   if (!stand.detalles || stand.detalles.length === 0) return null
-  // Buscar el detalle más reciente o activo
   const activeDetalle = stand.detalles.find(d => d.reservacion && d.reservacion.status !== 'cancelada')
-  if (activeDetalle) {
-    return activeDetalle.reservacion.usuario?.nombre_tienda || activeDetalle.reservacion.usuario?.nombre
-  }
-  return null
+  return activeDetalle ? activeDetalle.reservacion : null
+}
+
+const getOccupant = (stand) => {
+  const data = getOccupantData(stand)
+  return data ? (data.nombre_tienda || data.nombre) : null
+}
+
+const getOccupantData = (stand) => {
+  const reservacion = getReservacionActiva(stand)
+  return reservacion ? reservacion.usuario : null
+}
+
+const getStatusTypeCRM = (status) => {
+  if (status === 'Documentos OK') return 'success'
+  if (status === 'Bloqueado') return 'danger'
+  return 'warning'
+}
+
+const hasPagosAprobados = (reservacion) => {
+  if (!reservacion || !reservacion.pagos) return false
+  return reservacion.pagos.some(p => p.status === 'aprobado')
 }
 
 const fetchEventos = async () => {
@@ -181,6 +308,40 @@ const saveStand = async () => {
       }
     }
   })
+}
+
+const confirmWithdrawal = () => {
+  const reservacion = getReservacionActiva(form.value)
+  if (!reservacion) return
+  
+  retireModel.value = {
+    accion_financiera: 'credito',
+    motivo: ''
+  }
+  retireDialogVisible.value = true
+}
+
+const executeRetire = async () => {
+  const reservacion = getReservacionActiva(form.value)
+  if (!reservacion) return
+
+  retiring.value = true
+  try {
+    await axios.post(`/api/reservaciones/${reservacion.id_reservacion}/retiro`, retireModel.value)
+    ElMessage.success('Retiro procesado correctamente. El stand ha sido liberado.')
+    
+    // Limpieza de estado visual
+    retireDialogVisible.value = false
+    dialogVisible.value = false
+    retireModel.value.motivo = ''
+    retireModel.value.accion_financiera = 'credito'
+    
+    fetchStands()
+  } catch (error) {
+    ElMessage.error('Error al procesar retiro: ' + (error.response?.data?.message || 'Error desconocido'))
+  } finally {
+    retiring.value = false
+  }
 }
 
 onMounted(() => {
@@ -297,9 +458,23 @@ onMounted(() => {
 
 /* Colores por Estado */
 .stand-card.disponible { border-top: 5px solid #67c23a; }
-.stand-card.reserved { border-top: 5px solid #e6a23c; }
+.stand-card.reservado { border-top: 5px solid #e6a23c; } /* Corregido "reserved" por "reservado" para hacer match con BD */
 .stand-card.ocupado { border-top: 5px solid #f56c6c; }
-.stand-card.maintenance { border-top: 5px solid #909399; background: #fafafa; }
+.stand-card.mantenimiento { border-top: 5px solid #909399; background: #fafafa; } /* Corregido también maintenance a mantenimiento */
+
+.stand-card.has-debt {
+  border-top-color: #ff9800; /* Naranja para advertir deuda */
+  box-shadow: 0 0 10px rgba(255, 152, 0, 0.4);
+}
+.stand-card.has-debt::after {
+  content: "DEUDA";
+  position: absolute;
+  top: 5px;
+  right: 15px;
+  font-size: 10px;
+  color: #ff9800;
+  font-weight: bold;
+}
 
 .empty-state {
   margin-top: 50px;

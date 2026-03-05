@@ -11,7 +11,11 @@ class UsuarioController extends Controller
 {
     public function index()
     {
-        return response()->json(Usuario::with(['role', 'telefonos'])->get());
+        return response()->json(Usuario::with(['role', 'telefonos'])
+            ->withCount(['reservacions as participaciones' => function($query) {
+                $query->whereIn('status', ['confirmada', 'abonada']);
+            }])
+            ->get());
     }
 
     public function store(Request $request)
@@ -25,6 +29,10 @@ class UsuarioController extends Controller
             'email' => 'required|email|unique:usuarios,email',
             'password' => 'required|string|min:6',
             'direccion' => 'nullable|string|max:255',
+            'rubro' => 'nullable|string|max:100',
+            'instagram' => 'nullable|string|max:100',
+            'estado_registro' => 'nullable|in:Por Verificar,Documentos OK,Bloqueado',
+            'notas_admin' => 'nullable|string',
             'telefonos' => 'nullable|array',
             'telefonos.*' => 'string|max:25'
         ]);
@@ -44,7 +52,7 @@ class UsuarioController extends Controller
 
     public function show(Usuario $usuario)
     {
-        return response()->json($usuario->load(['role', 'telefonos', 'reservacions']));
+        return response()->json($usuario->load(['role', 'telefonos', 'reservacions.evento']));
     }
 
     public function update(Request $request, Usuario $usuario)
@@ -58,6 +66,10 @@ class UsuarioController extends Controller
             'email' => 'email|unique:usuarios,email,' . $usuario->id,
             'password' => 'nullable|string|min:6',
             'direccion' => 'nullable|string|max:255',
+            'rubro' => 'nullable|string|max:100',
+            'instagram' => 'nullable|string|max:100',
+            'estado_registro' => 'nullable|in:Por Verificar,Documentos OK,Bloqueado',
+            'notas_admin' => 'nullable|string',
         ]);
 
         if (isset($validated['password'])) {
@@ -65,6 +77,16 @@ class UsuarioController extends Controller
         }
 
         $usuario->update($validated);
+
+        if (isset($request->telefonos) && is_array($request->telefonos)) {
+            // Simplificado: borra y recrea para emprendedores de un solo teléfono
+            $usuario->telefonos()->delete();
+            foreach ($request->telefonos as $tel) {
+                if (!empty($tel)) {
+                    $usuario->telefonos()->create(['numeros_telefonos' => $tel]);
+                }
+            }
+        }
 
         return response()->json($usuario->load(['role', 'telefonos']));
     }

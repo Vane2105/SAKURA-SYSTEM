@@ -16,10 +16,14 @@ class Usuario extends Authenticatable
         'nombre',
         'apellido',
         'nombre_tienda',
+        'rubro',
+        'instagram',
         'ci',
         'email',
         'password',
-        'direccion'
+        'direccion',
+        'estado_registro',
+        'notas_admin'
     ];
 
     protected $hidden = [

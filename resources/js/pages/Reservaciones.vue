@@ -76,20 +76,60 @@
       <el-form :model="form" ref="formRef" :rules="rules" label-width="120px" label-position="top">
         <el-row :gutter="20">
           <el-col :span="12">
-            <el-form-item label="Emprendedor Principal" prop="usuarios_id">
-              <el-select v-model="form.usuarios_id" filterable placeholder="Buscar..." style="width: 100%">
-                <el-option v-for="u in usuarios" :key="u.id" :label="u.nombre_tienda || u.nombre" :value="u.id" />
+            <el-form-item label="Emprendedor Principal (Selector Inteligente)" prop="usuarios_id">
+              <el-select 
+                v-model="form.usuarios_id" 
+                filterable 
+                placeholder="Buscar por Nombre o Tienda..." 
+                style="width: 100%"
+                @change="handleUsuarioChange"
+              >
+                <el-option 
+                  v-for="u in usuarios" 
+                  :key="u.id" 
+                  :label="`${u.nombre_tienda || 'Sin Tienda'} - ${u.nombre}`" 
+                  :value="u.id"
+                >
+                    <div style="display: flex; justify-content: space-between;">
+                      <span>{{ u.nombre_tienda || u.nombre }}</span>
+                      <el-tag v-if="u.estado_registro === 'Bloqueado'" type="danger" size="small">BLOQUEADO</el-tag>
+                    </div>
+                </el-option>
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="Segundo Emprendedor (Opcional)">
-              <el-select v-model="form.usuario_2_id" filterable clearable placeholder="Buscar..." style="width: 100%">
+            <el-form-item label="Segundo Emprendedor (Socio Opcional)">
+              <el-select v-model="form.usuario_2_id" filterable clearable placeholder="Buscar socio..." style="width: 100%">
                 <el-option v-for="u in usuarios" :key="u.id" :label="u.nombre_tienda || u.nombre" :value="u.id" :disabled="u.id === form.usuarios_id" />
               </el-select>
             </el-form-item>
           </el-col>
         </el-row>
+
+        <!-- AREA DE AUTO-LLENADO / INFO CRM -->
+        <div v-if="selectedUser" style="margin-bottom: 20px; padding: 15px; background: #fdf6ec; border-radius: 8px; border: 1px dashed #e6a23c;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+              <div style="font-weight: bold; color: var(--sakura-purple); font-size: 16px;">{{ selectedUser.nombre_tienda || 'Emprendedor Individual' }}</div>
+              <div style="font-size: 13px; color: #606266;">
+                <el-icon><User /></el-icon> {{ selectedUser.nombre }} {{ selectedUser.apellido }} | 
+                <el-icon><Phone /></el-icon> {{ selectedUser.telefonos?.[0]?.numeros_telefonos || 'Sin Tlf' }}
+              </div>
+              <div v-if="selectedUser.instagram" style="font-size: 12px; color: #E1306C; margin-top: 5px;">
+                <b>Instagram:</b> @{{ selectedUser.instagram }} | <b>Rubro:</b> {{ selectedUser.rubro || 'N/A' }}
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <el-tag :type="getStatusColorCRM(selectedUser.estado_registro)" effect="dark">
+                {{ selectedUser.estado_registro }}
+              </el-tag>
+              <div v-if="selectedUser.estado_registro === 'Bloqueado'" style="color: #F56C6C; font-weight: bold; font-size: 11px; margin-top: 5px;">
+                ⚠️ ACCESO RESTRINGIDO
+              </div>
+            </div>
+          </div>
+        </div>
 
         <el-row :gutter="20">
           <el-col :span="24">
@@ -589,6 +629,24 @@ const fetchHistoryRate = async (fecha, targetForm, callback) => {
 }
 
 // Handlers
+const selectedUser = computed(() => {
+  if (!form.value.usuarios_id) return null
+  return usuarios.value.find(u => u.id === form.value.usuarios_id)
+})
+
+const getStatusColorCRM = (status) => {
+  if (status === 'Documentos OK') return 'success'
+  if (status === 'Bloqueado') return 'danger'
+  return 'warning'
+}
+
+const handleUsuarioChange = (val) => {
+  const user = usuarios.value.find(u => u.id === val)
+  if (user && user.estado_registro === 'Bloqueado') {
+    ElMessage.error('Este emprendedor está BLOQUEADO. No se le puede asignar stands.')
+  }
+}
+
 const openDialog = () => {
   form.value = { 
     usuarios_id: '', usuario_2_id: null, stands: [],
@@ -600,6 +658,9 @@ const openDialog = () => {
 }
 
 const saveReservacion = async () => {
+  if (selectedUser.value?.estado_registro === 'Bloqueado') {
+    return ElMessage.error('Operación abortada: El emprendedor principal está bloqueado por administración.')
+  }
   await formRef.value.validate(async (valid) => {
     if (!valid) return
     saving.value = true
@@ -608,7 +669,9 @@ const saveReservacion = async () => {
       ElMessage.success('Reservación creada')
       dialogVisible.value = false
       fetchReservaciones()
-    } catch (e) { ElMessage.error(e.response?.data?.message || 'Error') }
+    } catch (e) { 
+      ElMessage.error(e.response?.data?.message || 'Error al crear reservación') 
+    }
     finally { saving.value = false }
   })
 }
@@ -660,7 +723,14 @@ const toggleConciliacion = async (pago) => {
     }
   } catch (e) {
     pago.conciliado = !pago.conciliado // Revert
-    ElMessage.error('Error al cambiar estado de conciliación')
+    if (e.response && e.response.status === 422 && e.response.data.errors) {
+      const msgs = Array.isArray(e.response.data.errors) 
+        ? e.response.data.errors.join(' | ') 
+        : Object.values(e.response.data.errors).flat().join(' | ')
+      ElMessage.error(msgs || e.response.data.message)
+    } else {
+      ElMessage.error('Error al cambiar estado de conciliación')
+    }
   } finally {
     pago._toggling = false
   }
