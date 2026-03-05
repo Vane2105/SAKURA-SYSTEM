@@ -16,16 +16,13 @@ class Reservacion extends Model
         'fecha_reserva',
         'status',
         'descripcion',
-        'mobiliario_precio',
-        'mobiliario_pagado',
         'subido_redes',
         'usuario_2_id',
+        'evento_id',
     ];
 
     protected $casts = [
         'fecha_reserva' => 'datetime',
-        'mobiliario_precio' => 'float',
-        'mobiliario_pagado' => 'boolean',
         'subido_redes' => 'boolean',
     ];
 
@@ -37,6 +34,16 @@ class Reservacion extends Model
     public function usuario2()
     {
         return $this->belongsTo(Usuario::class, 'usuario_2_id');
+    }
+
+    public function evento()
+    {
+        return $this->belongsTo(Evento::class, 'evento_id');
+    }
+
+    public function mobiliarios()
+    {
+        return $this->hasMany(MobiliarioReservacion::class, 'reservacion_id', 'id_reservacion');
     }
 
     public function detalles()

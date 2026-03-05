@@ -6,20 +6,26 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    /**
+     * Run the migrations.
+     */
     public function up(): void
     {
-        Schema::create('alquileres_mobiliario', function (Blueprint $table) {
-            $table->id('id_alquiler');
+        Schema::create('mobiliario_reservacions', function (Blueprint $table) {
+            $table->id();
             $table->foreignId('reservacion_id')->constrained('reservacions', 'id_reservacion')->onDelete('cascade');
-            $table->string('descripcion')->nullable();
-            $table->decimal('precio_usd', 8, 2)->default(0);
-            $table->enum('status', ['pendiente', 'pagado', 'cancelado'])->default('pendiente');
+            $table->string('descripcion', 100);
+            $table->integer('cantidad')->default(1);
+            $table->decimal('precio_unitario_usd', 10, 2)->default(0);
             $table->timestamps();
         });
     }
 
+    /**
+     * Reverse the migrations.
+     */
     public function down(): void
     {
-        Schema::dropIfExists('alquileres_mobiliario');
+        Schema::dropIfExists('mobiliario_reservacions');
     }
 };

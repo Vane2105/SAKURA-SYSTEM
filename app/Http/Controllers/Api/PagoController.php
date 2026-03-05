@@ -24,11 +24,12 @@ class PagoController extends Controller
         $pago = Pago::create($validated);
 
         // Verificar si la deuda total está cubierta
-        $reservacion = Reservacion::with(['pagos', 'detalles.stand'])->find($validated['reservacion_id']);
+        $reservacion = Reservacion::with(['pagos', 'detalles.stand', 'mobiliarios'])->find($validated['reservacion_id']);
         
         $totalPagado = $reservacion->pagos()->sum('cantidad');
-        $totalStands = $reservacion->detalles->sum(function($d) { return $d->stand->precio; });
-        $totalDeuda = $totalStands + ($reservacion->mobiliario_precio ?? 0);
+        $totalStands = $reservacion->detalles->sum(function($d) { return floatval($d->stand->precio); });
+        $totalMobiliario = $reservacion->mobiliarios->sum(function($m) { return floatval($m->cantidad) * floatval($m->precio_unitario_usd); });
+        $totalDeuda = $totalStands + $totalMobiliario;
 
         if ($totalPagado >= $totalDeuda && $reservacion->status === 'pendiente') {
             $reservacion->update(['status' => 'confirmada']);
