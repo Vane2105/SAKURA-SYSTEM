@@ -33,8 +33,9 @@
           <small style="color: #999; font-size: 10px;">(Tasa: {{ row.tasa_bcv }} Bs/$)</small>
         </template>
       </el-table-column>
-      <el-table-column label="Acciones" width="100" align="center">
+      <el-table-column label="Acciones" width="120" align="center">
         <template #default="{ row }">
+          <el-button type="primary" icon="Edit" circle @click="openDialog(row)" />
           <el-button type="danger" icon="Delete" circle @click="deleteGasto(row.id_gastos)" />
         </template>
       </el-table-column>
@@ -51,11 +52,11 @@
       </div>
     </div>
 
-    <!-- Dialogo Nuevo Gasto -->
-    <el-dialog title="Registrar Nuevo Gasto" v-model="dialogVisible" width="450px">
+    <!-- Dialogo Gasto -->
+    <el-dialog :title="isEdit ? 'Editar Gasto' : 'Registrar Nuevo Gasto'" v-model="dialogVisible" width="450px">
       <el-form :model="form" ref="formRef" :rules="rules" label-position="top">
-        <el-form-item label="Concepto" prop="concepto">
-          <el-input v-model="form.concepto" placeholder="Ej: Alquiler del Local" />
+        <el-form-item label="Concepto" prop="concepto" :error="formErrors.concepto">
+          <el-input v-model="form.concepto" @blur="validateField('concepto')" placeholder="Ej: Alquiler del Local" />
         </el-form-item>
         
         <el-row :gutter="20">
@@ -72,13 +73,14 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="Fecha" prop="fecha">
+            <el-form-item label="Fecha" prop="fecha" :error="formErrors.fecha">
               <el-date-picker 
                 v-model="form.fecha" 
                 type="date" 
                 style="width: 100%" 
                 value-format="YYYY-MM-DD"
                 @change="handleDateChange"
+                @blur="validateField('fecha')"
               />
             </el-form-item>
           </el-col>
@@ -89,15 +91,21 @@
         </div>
 
         <el-divider>Montos (Conversión automática)</el-divider>
-        <div class="conversion-box">
-          <div style="font-size: 12px; color: #888; margin-bottom: 10px;">
-            Tasa Aplicada: <b>{{ form.tasa_bcv }} Bs/$</b> <small v-if="form.tasa_fuente">({{ form.tasa_fuente }})</small>
-          </div>
+        <div class="conversion-box" style="background: #fdfdfd; padding: 15px; border-radius: 8px; border: 1px solid #efefef; margin-bottom: 20px;">
+          <el-row :gutter="20" align="middle" style="margin-bottom: 15px;">
+            <el-col :span="12">
+              <span style="font-size: 13px; color: #606266; font-weight: bold;">Tasa de Cambio (Bs/$)</span>
+              <div style="font-size: 11px; color: #909399;">{{ form.tasa_fuente || 'Manual' }}</div>
+            </el-col>
+            <el-col :span="12" style="text-align: right;">
+              <el-input-number v-model="form.tasa_bcv" :precision="4" :step="0.1" @change="updateFromUsd(form.monto_usd)" style="width: 100%" />
+            </el-col>
+          </el-row>
           
           <el-row :gutter="20">
             <el-col :span="12">
-              <el-form-item label="Monto en USD" prop="monto_usd">
-                <el-input-number v-model="form.monto_usd" :precision="2" :step="10" @input="updateFromUsd" style="width: 100%" />
+              <el-form-item label="Monto en USD" prop="monto_usd" :error="formErrors.monto_usd">
+                <el-input-number v-model="form.monto_usd" :precision="2" :step="10" @input="updateFromUsd" @blur="validateField('monto_usd')" style="width: 100%" />
               </el-form-item>
             </el-col>
             <el-col :span="12">
@@ -133,14 +141,34 @@ const props = defineProps({
   }
 })
 
-const defineEmits = ['back']
+const emit = defineEmits(['back'])
 
 const gastos = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const isEdit = ref(false)
 const loadingRate = ref(false)
 const tasaBcvGlobal = ref(0)
+const formRef = ref(null)
+
+const formErrors = ref({
+  concepto: '',
+  fecha: '',
+  monto_usd: ''
+})
+
+const validateField = (field) => {
+  if (field === 'concepto') {
+    formErrors.value.concepto = form.value.concepto ? '' : 'Falta el concepto de gasto'
+  }
+  if (field === 'fecha') {
+    formErrors.value.fecha = form.value.fecha ? '' : 'Seleccione la fecha del registro'
+  }
+  if (field === 'monto_usd') {
+    formErrors.value.monto_usd = form.value.monto_usd > 0 ? '' : 'El monto debe ser mayor a 0'
+  }
+}
 
 const form = ref({
   concepto: '',
@@ -154,9 +182,9 @@ const form = ref({
 })
 
 const rules = {
-  concepto: [{ required: true, message: 'El concepto es obligatorio', trigger: 'blur' }],
+  concepto: [{ required: true, message: 'El concepto es obligatorio', trigger: ['blur', 'change'] }],
   fecha: [{ required: true, message: 'La fecha es obligatoria', trigger: 'change' }],
-  monto_usd: [{ required: true, message: 'El monto en USD es obligatorio', trigger: 'blur' }]
+  monto_usd: [{ required: true, message: 'El monto en USD es obligatorio', trigger: ['blur', 'change'] }]
 }
 
 const totalUsd = computed(() => gastos.value.reduce((acc, g) => acc + parseFloat(g.monto_usd), 0))
@@ -181,16 +209,28 @@ const fetchGastos = async () => {
   }
 }
 
-const openDialog = () => {
-  form.value = {
-    concepto: '',
-    categoria: 'Logística',
-    monto_usd: 0,
-    monto_bs: 0,
-    tasa_bcv: tasaBcvGlobal.value,
-    tasa_fuente: 'Actual (BCV)',
-    fecha: new Date().toISOString().split('T')[0],
-    descripcion: ''
+const openDialog = (gasto = null) => {
+  if (gasto && gasto.id_gastos) {
+    isEdit.value = true
+    form.value = { ...gasto }
+    // Asegurarse de que fecha sea string YYYY-MM-DD
+    if (form.value.fecha instanceof Date) {
+      form.value.fecha = form.value.fecha.toISOString().split('T')[0]
+    } else if (typeof form.value.fecha === 'string' && form.value.fecha.includes('T')) {
+      form.value.fecha = form.value.fecha.split('T')[0]
+    }
+  } else {
+    isEdit.value = false
+    form.value = {
+      concepto: '',
+      categoria: 'Logística',
+      monto_usd: 0,
+      monto_bs: 0,
+      tasa_bcv: tasaBcvGlobal.value,
+      tasa_fuente: 'Actual (BCV)',
+      fecha: new Date().toISOString().split('T')[0],
+      descripcion: ''
+    }
   }
   dialogVisible.value = true
 }
@@ -239,23 +279,23 @@ const saveGasto = async () => {
     if (valid) {
       saving.value = true
       try {
-        await axios.post('/api/gastos', {
+        const payload = {
           ...form.value,
-          id_eventos: props.evento.id_eventos,
-          tasa_bcv: form.value.tasa_bcv,
-          fecha: form.value.fecha
-        })
-        ElMessage.success('Gasto registrado con éxito')
+          id_eventos: props.evento.id_eventos
+        }
+        
+        if (isEdit.value) {
+          await axios.put(`/api/gastos/${form.value.id_gastos}`, payload)
+          ElMessage.success('Gasto actualizado correctamente')
+        } else {
+          await axios.post('/api/gastos', payload)
+          ElMessage.success('Gasto registrado correctamente')
+        }
+        
         dialogVisible.value = false
         fetchGastos()
       } catch (error) {
-        if (error.response && error.response.status === 422) {
-          const errors = error.response.data.errors
-          const firstError = Object.values(errors)[0][0]
-          ElMessage.error(firstError)
-        } else {
-          ElMessage.error('Error al guardar: ' + (error.response?.data?.message || 'Error desconocido'))
-        }
+        ElMessage.error('Error al guardar el gasto')
       } finally {
         saving.value = false
       }

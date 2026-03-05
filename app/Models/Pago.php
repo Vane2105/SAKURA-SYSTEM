@@ -14,8 +14,16 @@ class Pago extends Model
     protected $fillable = [
         'reservacion_id',
         'cantidad',
+        'tasa_bcv',
+        'fecha',
         'numero_referencia',
         'status',
+    ];
+
+    protected $casts = [
+        'fecha' => 'date',
+        'cantidad' => 'float',
+        'tasa_bcv' => 'float',
     ];
 
     public function reservacion()

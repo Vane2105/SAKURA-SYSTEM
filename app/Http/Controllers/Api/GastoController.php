@@ -24,7 +24,7 @@ class GastoController extends Controller
             'concepto' => 'required|string|max:255',
             'categoria' => 'nullable|string|max:100',
             'monto_usd' => 'required|numeric|min:0',
-            'monto_bs' => 'required|numeric|min:0',
+            'monto_bs' => 'nullable|numeric|min:0',
             'tasa_bcv' => 'required|numeric|min:0',
             'fecha' => 'required|date',
             'descripcion' => 'nullable|string',
@@ -32,6 +32,22 @@ class GastoController extends Controller
 
         $gasto = Gasto::create($validated);
         return response()->json($gasto, 201);
+    }
+
+    public function update(Request $request, Gasto $gasto)
+    {
+        $validated = $request->validate([
+            'concepto' => 'required|string|max:255',
+            'categoria' => 'nullable|string|max:100',
+            'monto_usd' => 'required|numeric|min:0',
+            'monto_bs' => 'nullable|numeric|min:0',
+            'tasa_bcv' => 'required|numeric|min:0',
+            'fecha' => 'required|date',
+            'descripcion' => 'nullable|string',
+        ]);
+
+        $gasto->update($validated);
+        return response()->json($gasto);
     }
 
     public function destroy(Gasto $gasto)

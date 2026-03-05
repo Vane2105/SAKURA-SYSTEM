@@ -19,6 +19,7 @@ class Reservacion extends Model
         'mobiliario_precio',
         'mobiliario_pagado',
         'subido_redes',
+        'usuario_2_id',
     ];
 
     protected $casts = [
@@ -31,6 +32,11 @@ class Reservacion extends Model
     public function usuario()
     {
         return $this->belongsTo(Usuario::class, 'usuarios_id');
+    }
+
+    public function usuario2()
+    {
+        return $this->belongsTo(Usuario::class, 'usuario_2_id');
     }
 
     public function detalles()

@@ -119,7 +119,10 @@ const getOccupant = (stand) => {
   // Buscar el detalle más reciente o activo
   const activeDetalle = stand.detalles.find(d => d.reservacion && d.reservacion.status !== 'cancelada')
   if (activeDetalle) {
-    return activeDetalle.reservacion.usuario?.nombre_tienda || activeDetalle.reservacion.usuario?.nombre
+    const res = activeDetalle.reservacion
+    const name1 = res.usuario?.nombre_tienda || res.usuario?.nombre || ''
+    const name2 = res.usuario2?.nombre_tienda || res.usuario2?.nombre || ''
+    return name2 ? `${name1} + ${name2}` : name1
   }
   return null
 }

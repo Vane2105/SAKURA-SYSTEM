@@ -12,7 +12,7 @@ class ReservacionController extends Controller
 {
     public function index()
     {
-        return response()->json(Reservacion::with(['usuario', 'detalles.stand', 'pagos', 'reembolsos'])->get());
+        return response()->json(Reservacion::with(['usuario', 'usuario2', 'detalles.stand', 'pagos', 'reembolsos'])->get());
     }
 
     public function store(Request $request)
@@ -27,7 +27,9 @@ class ReservacionController extends Controller
             'subido_redes' => 'nullable|boolean',
             'monto_pago' => 'nullable|numeric|min:0',
             'referencia_pago' => 'nullable|string|max:100',
-            'tasa_bcv' => 'nullable|numeric|min:0'
+            'tasa_bcv' => 'nullable|numeric|min:0',
+            'fecha_pago' => 'nullable|date',
+            'usuario_2_id' => 'nullable|exists:usuarios,id'
         ]);
 
         return DB::transaction(function () use ($validated) {
@@ -37,6 +39,7 @@ class ReservacionController extends Controller
                 'mobiliario_precio' => $validated['mobiliario_precio'] ?? null,
                 'mobiliario_pagado' => $validated['mobiliario_pagado'] ?? false,
                 'subido_redes' => $validated['subido_redes'] ?? false,
+                'usuario_2_id' => $validated['usuario_2_id'] ?? null,
                 'status' => 'pendiente'
             ]);
 
@@ -44,17 +47,31 @@ class ReservacionController extends Controller
                 $reservacion->detalles()->create([
                     'stands_id' => $standId
                 ]);
-                
-                // Marcar stand como reservado
-                Stand::where('id_stands', $standId)->update(['status' => 'reservado']);
+            }
+
+            // Evaluar estado inicial basado en pago
+            $totalStands = Stand::whereIn('id_stands', $validated['stands'])->sum('precio');
+            $totalDeuda = $totalStands + ($validated['mobiliario_precio'] ?? 0);
+            $montoPagado = $validated['monto_pago'] ?? 0;
+
+            if ($montoPagado >= $totalDeuda && $totalDeuda > 0) {
+                $reservacion->update(['status' => 'confirmada']);
+                foreach ($validated['stands'] as $id) {
+                    Stand::where('id_stands', $id)->update(['status' => 'ocupado']);
+                }
+            } else {
+                foreach ($validated['stands'] as $id) {
+                    Stand::where('id_stands', $id)->update(['status' => 'reservado']);
+                }
             }
 
             // Registrar pago inicial si existe
-            if (isset($validated['monto_pago']) && $validated['monto_pago'] > 0) {
+            if ($montoPagado > 0) {
                 $reservacion->pagos()->create([
-                    'cantidad' => $validated['monto_pago'],
+                    'cantidad' => $montoPagado,
                     'numero_referencia' => $validated['referencia_pago'] ?? null,
                     'tasa_bcv' => $validated['tasa_bcv'] ?? null,
+                    'fecha' => $validated['fecha_pago'] ?? now()->toDateString(),
                     'status' => 'aprobado'
                 ]);
             }

@@ -16,15 +16,21 @@ class PagoController extends Controller
             'cantidad' => 'required|numeric|min:0.01',
             'numero_referencia' => 'nullable|string|max:255',
             'tasa_bcv' => 'nullable|numeric|min:0',
+            'fecha' => 'nullable|date',
         ]);
 
         $validated['status'] = 'aprobado'; // Auto-aprobado por el admin
         
         $pago = Pago::create($validated);
 
-        // Opcional: Auto-confirmar la reservación si el pago es mayor a 0
-        $reservacion = Reservacion::find($validated['reservacion_id']);
-        if ($reservacion->status === 'pendiente') {
+        // Verificar si la deuda total está cubierta
+        $reservacion = Reservacion::with(['pagos', 'detalles.stand'])->find($validated['reservacion_id']);
+        
+        $totalPagado = $reservacion->pagos()->sum('cantidad');
+        $totalStands = $reservacion->detalles->sum(function($d) { return $d->stand->precio; });
+        $totalDeuda = $totalStands + ($reservacion->mobiliario_precio ?? 0);
+
+        if ($totalPagado >= $totalDeuda && $reservacion->status === 'pendiente') {
             $reservacion->update(['status' => 'confirmada']);
             $standIds = $reservacion->detalles()->pluck('stands_id');
             \App\Models\Stand::whereIn('id_stands', $standIds)->update(['status' => 'ocupado']);
