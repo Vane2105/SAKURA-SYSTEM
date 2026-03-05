@@ -10,7 +10,7 @@ class StandController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Stand::with('evento');
+        $query = Stand::with(['evento', 'detalles.reservacion.usuario']);
 
         if ($request->has('evento_id')) {
             $query->where('eventos_id', $request->evento_id);

@@ -21,13 +21,22 @@ class ReservacionController extends Controller
             'usuarios_id' => 'required|exists:usuarios,id',
             'descripcion' => 'nullable|string|max:45',
             'stands' => 'required|array|min:1',
-            'stands.*' => 'exists:stands,id_stands'
+            'stands.*' => 'exists:stands,id_stands',
+            'mobiliario_precio' => 'nullable|numeric|min:0',
+            'mobiliario_pagado' => 'nullable|boolean',
+            'subido_redes' => 'nullable|boolean',
+            'monto_pago' => 'nullable|numeric|min:0',
+            'referencia_pago' => 'nullable|string|max:100',
+            'tasa_bcv' => 'nullable|numeric|min:0'
         ]);
 
         return DB::transaction(function () use ($validated) {
             $reservacion = Reservacion::create([
                 'usuarios_id' => $validated['usuarios_id'],
                 'descripcion' => $validated['descripcion'] ?? null,
+                'mobiliario_precio' => $validated['mobiliario_precio'] ?? null,
+                'mobiliario_pagado' => $validated['mobiliario_pagado'] ?? false,
+                'subido_redes' => $validated['subido_redes'] ?? false,
                 'status' => 'pendiente'
             ]);
 
@@ -38,6 +47,16 @@ class ReservacionController extends Controller
                 
                 // Marcar stand como reservado
                 Stand::where('id_stands', $standId)->update(['status' => 'reservado']);
+            }
+
+            // Registrar pago inicial si existe
+            if (isset($validated['monto_pago']) && $validated['monto_pago'] > 0) {
+                $reservacion->pagos()->create([
+                    'cantidad' => $validated['monto_pago'],
+                    'numero_referencia' => $validated['referencia_pago'] ?? null,
+                    'tasa_bcv' => $validated['tasa_bcv'] ?? null,
+                    'status' => 'aprobado'
+                ]);
             }
 
             return response()->json($reservacion->load(['usuario', 'detalles.stand']), 201);
@@ -69,5 +88,19 @@ class ReservacionController extends Controller
         });
 
         return response()->json($reservacion->fresh(['detalles.stand']));
+    }
+
+    public function update(Request $request, Reservacion $reservacion)
+    {
+        $validated = $request->validate([
+            'mobiliario_precio' => 'nullable|numeric|min:0',
+            'mobiliario_pagado' => 'nullable|boolean',
+            'subido_redes' => 'nullable|boolean',
+            'descripcion' => 'nullable|string|max:45',
+        ]);
+
+        $reservacion->update($validated);
+
+        return response()->json($reservacion->fresh(['usuario', 'detalles.stand', 'pagos']));
     }
 }

@@ -10,7 +10,27 @@ class EventoController extends Controller
 {
     public function index()
     {
-        return response()->json(Evento::with('creador')->get());
+        $eventos = Evento::with(['creador', 'gastos', 'stands.detalles.reservacion.pagos'])->get();
+        
+        $eventos->each(function($evento) {
+            // Calcular ingresos (pagos aprobados de reservaciones vinculadas a este evento)
+            $totalIngresos = 0;
+            foreach ($evento->stands as $stand) {
+                foreach ($stand->detalles as $detalle) {
+                    if ($detalle->reservacion) {
+                        $totalIngresos += $detalle->reservacion->pagos()
+                            ->where('status', 'aprobado')
+                            ->sum('cantidad');
+                    }
+                }
+            }
+            
+            $evento->total_ingresos = $totalIngresos;
+            $evento->total_gastos = $evento->gastos->sum('monto_usd');
+            $evento->rentabilidad = $totalIngresos - $evento->total_gastos;
+        });
+
+        return response()->json($eventos);
     }
 
     public function store(Request $request)
@@ -21,12 +41,24 @@ class EventoController extends Controller
             'direccion' => 'required|string|max:255',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
+            'base_precio_stand' => 'nullable|numeric|min:0',
         ]);
 
         $validated['created_by'] = $request->user()->id;
 
         $evento = Evento::create($validated);
-        return response()->json($evento, 201);
+
+        // Auto-generar 20 stands para el nuevo evento con el precio base
+        $precioBase = $request->base_precio_stand ?? 0;
+        for ($i = 1; $i <= 20; $i++) {
+            $evento->stands()->create([
+                'name' => "Stand $i",
+                'precio' => $precioBase,
+                'status' => 'disponible'
+            ]);
+        }
+
+        return response()->json($evento->load('stands'), 201);
     }
 
     public function show(Evento $evento)
@@ -42,9 +74,16 @@ class EventoController extends Controller
             'direccion' => 'string|max:255',
             'start_date' => 'date',
             'end_date' => 'date|after_or_equal:start_date',
+            'base_precio_stand' => 'nullable|numeric|min:0',
         ]);
 
+        $previousBasePrice = $evento->base_precio_stand;
         $evento->update($validated);
+
+        // Si el precio base cambió, actualizar todos los stands del evento
+        if (isset($validated['base_precio_stand']) && $validated['base_precio_stand'] != $previousBasePrice) {
+            $evento->stands()->update(['precio' => $validated['base_precio_stand']]);
+        }
         return response()->json($evento);
     }
 

@@ -78,7 +78,8 @@ const handleLogin = async () => {
         ElMessage.success('¡Bienvenido al sistema!')
         router.push('/')
       } catch (error) {
-        ElMessage.error('Credenciales incorrectas. Intente nuevamente.')
+        const msg = error.response?.data?.message || error.response?.data?.errors?.email?.[0] || 'Error de conexión con el servidor.';
+        ElMessage.error(msg)
       } finally {
         loading.value = false
       }

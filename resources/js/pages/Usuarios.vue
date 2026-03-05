@@ -9,9 +9,9 @@
 
     <el-table :data="usuarios" v-loading="loading" style="width: 100%" border stripe>
       <el-table-column prop="ci" label="Cédula" width="120" />
+      <el-table-column prop="nombre_tienda" label="Tienda" />
       <el-table-column prop="nombre" label="Nombre" />
       <el-table-column prop="apellido" label="Apellido" />
-      <el-table-column prop="email" label="Correo" />
       <el-table-column label="Teléfonos">
         <template #default="scope">
           <div v-for="t in scope.row.telefonos" :key="t.id_telefonos">
@@ -45,7 +45,11 @@
             </el-form-item>
           </el-col>
         </el-row>
-        
+
+        <el-form-item label="Nombre de la Tienda" prop="nombre_tienda">
+          <el-input v-model="form.nombre_tienda" placeholder="Ej: Sakura Accessories" />
+        </el-form-item>
+
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="Cédula" prop="ci">
@@ -58,10 +62,6 @@
             </el-form-item>
           </el-col>
         </el-row>
-
-        <el-form-item label="Correo Electrónico" prop="email">
-          <el-input v-model="form.email" />
-        </el-form-item>
 
         <el-form-item label="Dirección" prop="direccion">
           <el-input v-model="form.direccion" />
@@ -93,8 +93,9 @@ const formRef = ref(null)
 const form = ref({
   nombre: '',
   apellido: '',
+  nombre_tienda: '',
   ci: '',
-  email: '',
+  telefonoPrincipal: '',
   telefonoPrincipal: '',
   direccion: '',
   password: 'password123', // Static pass for manual registrations
@@ -102,8 +103,15 @@ const form = ref({
 })
 
 const rules = {
-  nombre: [{ required: true, message: 'Requerido', trigger: 'blur' }],
-  email: [{ required: true, type: 'email', message: 'Correo válido requerido', trigger: 'blur' }]
+  nombre: [{ required: true, message: 'El nombre es obligatorio', trigger: 'blur' }],
+  apellido: [{ required: true, message: 'El apellido es obligatorio', trigger: 'blur' }],
+  nombre_tienda: [{ required: true, message: 'El nombre de la tienda es obligatorio', trigger: 'blur' }],
+  ci: [
+    { required: true, message: 'La cédula es obligatoria', trigger: 'blur' },
+    { pattern: /^[0-9]+$/, message: 'La cédula debe ser numérica', trigger: 'blur' }
+  ],
+  telefonoPrincipal: [{ required: true, message: 'El teléfono es obligatorio', trigger: 'blur' }],
+  direccion: [{ required: true, message: 'La dirección es obligatoria', trigger: 'blur' }]
 }
 
 const fetchUsuarios = async () => {
@@ -121,7 +129,7 @@ const fetchUsuarios = async () => {
 
 const openDialog = () => {
   form.value = { 
-    nombre: '', apellido: '', ci: '', email: '', 
+    nombre: '', apellido: '', nombre_tienda: '', ci: '', 
     telefonoPrincipal: '', direccion: '', 
     password: 'password123', role_id: 2 
   }
@@ -135,6 +143,8 @@ const saveUsuario = async () => {
       saving.value = true
       try {
         const payload = { ...form.value }
+        // Auto-generar email interno
+        payload.email = (payload.ci || Date.now()) + '@emprendedor.local'
         if (payload.telefonoPrincipal) {
           payload.telefonos = [payload.telefonoPrincipal]
         }
@@ -143,7 +153,13 @@ const saveUsuario = async () => {
         dialogVisible.value = false
         fetchUsuarios()
       } catch (error) {
-        ElMessage.error(error.response?.data?.message || 'Error al guardar')
+        if (error.response && error.response.status === 422) {
+          const errors = error.response.data.errors
+          const firstError = Object.values(errors)[0][0]
+          ElMessage.error(firstError)
+        } else {
+          ElMessage.error('Error al guardar: ' + (error.response?.data?.message || 'Error desconocido'))
+        }
       } finally {
         saving.value = false
       }

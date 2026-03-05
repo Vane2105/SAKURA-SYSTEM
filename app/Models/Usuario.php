@@ -15,6 +15,7 @@ class Usuario extends Authenticatable
         'role_id',
         'nombre',
         'apellido',
+        'nombre_tienda',
         'ci',
         'email',
         'password',

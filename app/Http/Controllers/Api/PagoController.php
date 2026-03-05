@@ -15,6 +15,7 @@ class PagoController extends Controller
             'reservacion_id' => 'required|exists:reservacions,id_reservacion',
             'cantidad' => 'required|numeric|min:0.01',
             'numero_referencia' => 'nullable|string|max:255',
+            'tasa_bcv' => 'nullable|numeric|min:0',
         ]);
 
         $validated['status'] = 'aprobado'; // Auto-aprobado por el admin

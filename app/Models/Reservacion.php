@@ -16,10 +16,16 @@ class Reservacion extends Model
         'fecha_reserva',
         'status',
         'descripcion',
+        'mobiliario_precio',
+        'mobiliario_pagado',
+        'subido_redes',
     ];
 
     protected $casts = [
         'fecha_reserva' => 'datetime',
+        'mobiliario_precio' => 'float',
+        'mobiliario_pagado' => 'boolean',
+        'subido_redes' => 'boolean',
     ];
 
     public function usuario()
